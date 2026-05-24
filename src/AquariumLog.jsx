@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { createClient } from "@supabase/supabase-js";
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ComposedChart, ReferenceLine, Legend } from "recharts";
 
 // ─── Supabase ─────────────────────────────────────────────────────────────────
 const supabase = createClient(
@@ -65,9 +65,45 @@ const NAV = [
   {id:"Parameters",  icon:"💧"},
   {id:"Maintenance", icon:"🔧"},
   {id:"Livestock",   icon:"🐟"},
+  {id:"Scheduler",   icon:"📅"},
   {id:"My Tanks",    icon:"🪸"},
   {id:"Diary",       icon:"📓"},
   {id:"Manage Tanks",icon:"⚙️"},
+];
+
+// ─── Multi-axis chart pairs (correlated parameters) ───────────────────────────
+const CHART_PAIRS = {
+  freshwater: [
+    { keys:["nitrate"],            label:"Nitrate" },
+    { keys:["ph","alkalinity"],    label:"pH vs Alkalinity" },
+    { keys:["ammonia"],            label:"Ammonia" },
+  ],
+  saltwater: [
+    { keys:["nitrate","phosphate"],label:"Nitrate vs Phosphate" },
+    { keys:["ph","alkalinity"],    label:"pH vs Alkalinity" },
+    { keys:["calcium","magnesium"],label:"Calcium vs Magnesium" },
+    { keys:["salinity"],           label:"Salinity" },
+  ],
+};
+
+// ─── Date range options ───────────────────────────────────────────────────────
+const DATE_RANGES = [
+  {label:"7d",  days:7},
+  {label:"30d", days:30},
+  {label:"90d", days:90},
+  {label:"All", days:9999},
+];
+
+// ─── Task categories ──────────────────────────────────────────────────────────
+const TASK_CATS = ["Water Change","Filter","Skimmer","Dosing","Testing","Equipment","Coral","Other"];
+const TASK_FREQS = [
+  {label:"Daily",    days:1},
+  {label:"Every 3d", days:3},
+  {label:"Weekly",   days:7},
+  {label:"Biweekly", days:14},
+  {label:"Monthly",  days:30},
+  {label:"Every 3mo",days:90},
+  {label:"Custom",   days:0},
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -165,6 +201,7 @@ export default function App() {
   const [params, setParams]     = useState([]);
   const [diary, setDiary]       = useState([]);
   const [lsLog, setLsLog]       = useState([]);
+  const [tasks, setTasks]       = useState([]);
   const [loading, setLoading]   = useState(true);
   const [activeTank, setActiveTank] = useState("");
   const [toast, setToast]       = useState(null);
@@ -179,11 +216,12 @@ export default function App() {
   const loadAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [tRes, pRes, dRes, lRes] = await Promise.all([
+      const [tRes, pRes, dRes, lRes, tkRes] = await Promise.all([
         supabase.from("tanks").select("*").order("setup_date", {ascending:true}),
         supabase.from("parameters").select("*").order("date", {ascending:true}),
         supabase.from("diary").select("*").order("date", {ascending:false}),
         supabase.from("livestock").select("*").order("date_added", {ascending:true}),
+        supabase.from("tasks").select("*").order("next_due", {ascending:true}),
       ]);
       const tankData = (tRes.data && tRes.data.length > 0) ? sortTanks(tRes.data) : FALLBACK_TANKS;
       setTanks(tankData);
@@ -191,6 +229,7 @@ export default function App() {
       setParams(pRes.data || []);
       setDiary(dRes.data || []);
       setLsLog(lRes.data || []);
+      setTasks(tkRes.data || []);
     } catch (err) {
       showToast("Load error: "+err.message, "error");
     }
@@ -208,7 +247,7 @@ export default function App() {
 
   function tankName(t) { return t.name || t.id; }
 
-  const pageProps = { tanks, params, setParams, diary, setDiary, lsLog, setLsLog, activeTank, setActiveTank, showToast, setTanks, tankName, loadAll };
+  const pageProps = { tanks, params, setParams, diary, setDiary, lsLog, setLsLog, tasks, setTasks, activeTank, setActiveTank, showToast, setTanks, tankName, loadAll };
 
   return (
     <div style={{minHeight:"100vh",background:"#080d1a",color:"#e2e8f0",fontFamily:"'DM Sans','Segoe UI',sans-serif",maxWidth:"100vw",overflowX:"hidden"}}>
@@ -268,6 +307,7 @@ export default function App() {
             {page==="Parameters"   && <LogParams    {...pageProps}/>}
             {page==="Maintenance"  && <LogMaint     {...pageProps}/>}
             {page==="Livestock"    && <LogLivestock {...pageProps}/>}
+            {page==="Scheduler"    && <Scheduler    {...pageProps}/>}
             {page==="My Tanks"     && <MyTanks      {...pageProps}/>}
             {page==="Diary"        && <DiaryPage    {...pageProps}/>}
             {page==="Manage Tanks" && <ManageTanks  {...pageProps}/>}
@@ -279,36 +319,60 @@ export default function App() {
 }
 
 // ─── Dashboard ────────────────────────────────────────────────────────────────
-function Dashboard({tanks,params,diary,lsLog,activeTank,setActiveTank,tankName}) {
-  const tank  = tanks.find(t => (t.name||t.id)===activeTank);
-  const isSW  = tank?.type==="saltwater";
-  const pKeys = isSW ? SW_PARAMS : FW_PARAMS;
-  const color = getTankColor(activeTank, tanks);
-
-  const allTP      = params.filter(p=>p.tank===activeTank).sort((a,b)=>b.date.localeCompare(a.date));
-  const latest     = allTP[0];
-  const recent     = params.filter(p=>p.tank===activeTank&&p.date>=FOUR_WEEKS_AGO).sort((a,b)=>a.date.localeCompare(b.date));
-  const recentDiary= diary.filter(d=>d.tank===activeTank&&d.date>=FOUR_WEEKS_AGO).sort((a,b)=>b.date.localeCompare(a.date)).slice(0,5);
-  const liveTankLS = lsLog.filter(l=>l.tank===activeTank&&l.status==="Live");
-  const totalLive  = liveTankLS.reduce((s,l)=>s+(l.qty||1),0);
+function Dashboard({tanks,params,diary,lsLog,tasks,activeTank,setActiveTank,tankName}) {
+  const [rangeDays,setRangeDays]=useState(30);
+  const tank =tanks.find(t=>(t.name||t.id)===activeTank);
+  const isSW =tank?.type==="saltwater";
+  const color=getTankColor(activeTank,tanks);
+  const cutoff=(()=>{const d=new Date();d.setDate(d.getDate()-rangeDays);return d.toISOString().slice(0,10);})();
+  const allTP=params.filter(p=>p.tank===activeTank).sort((a,b)=>b.date.localeCompare(a.date));
+  const latest=allTP[0];
+  const recent=params.filter(p=>p.tank===activeTank&&(rangeDays===9999||p.date>=cutoff)).sort((a,b)=>a.date.localeCompare(b.date));
+  const recentDiary=diary.filter(d=>d.tank===activeTank&&d.date>=FOUR_WEEKS_AGO).sort((a,b)=>b.date.localeCompare(a.date)).slice(0,5);
+  const liveTankLS=lsLog.filter(l=>l.tank===activeTank&&l.status==="Live");
+  const totalLive=liveTankLS.reduce((s,l)=>s+(l.qty||1),0);
+  const dueTasks=tasks.filter(t=>t.tank===activeTank&&t.active&&t.next_due&&t.next_due<=TODAY_STR);
+  const chartPairs=isSW?CHART_PAIRS.saltwater:CHART_PAIRS.freshwater;
+  const alerts=latest?Object.entries(PARAM_SAFE).filter(([k,safe])=>{const v=latest[k];return v!=null&&(v<safe.min||v>safe.max);}):[];
 
   return (
     <div>
-      {/* All tanks quick status */}
+      {alerts.length>0&&(
+        <div style={{background:"rgba(248,113,113,0.08)",border:"1px solid #f87171",borderRadius:12,padding:"12px 16px",marginBottom:14,display:"flex",flexWrap:"wrap",gap:8,alignItems:"center"}}>
+          <span style={{fontSize:16}}>⚠️</span>
+          <span style={{fontSize:12,fontWeight:700,color:"#f87171"}}>Parameter Alert — {activeTank}</span>
+          {alerts.map(([k,safe])=>{const v=latest[k],over=v>safe.max;return(
+            <span key={k} style={{fontSize:11,background:"rgba(248,113,113,0.15)",color:"#f87171",borderRadius:6,padding:"2px 10px",fontWeight:600}}>
+              {PARAM_LABELS[k]}: {v} {over?"↑ above":"↓ below"} {over?safe.max:safe.min}
+            </span>
+          );})}
+        </div>
+      )}
+      {dueTasks.length>0&&(
+        <div style={{background:"rgba(251,191,36,0.07)",border:"1px solid #fbbf24",borderRadius:12,padding:"12px 16px",marginBottom:14,display:"flex",flexWrap:"wrap",gap:8,alignItems:"center"}}>
+          <span style={{fontSize:16}}>📅</span>
+          <span style={{fontSize:12,fontWeight:700,color:"#fbbf24"}}>{dueTasks.length} task{dueTasks.length>1?"s":""} overdue</span>
+          {dueTasks.map(t=><span key={t.id} style={{fontSize:11,background:"rgba(251,191,36,0.15)",color:"#fbbf24",borderRadius:6,padding:"2px 10px",fontWeight:600}}>{t.title}</span>)}
+        </div>
+      )}
+
       <div style={{...S.card,marginBottom:14}}>
         <div style={{fontSize:13,fontWeight:700,marginBottom:12,color:"#cbd5e1"}}>All Tanks — Quick Status</div>
         <div className="grid-6">
-          {tanks.map(t => {
-            const tn    = tankName(t);
-            const tc    = getTankColor(tn, tanks);
-            const last  = params.filter(p=>p.tank===tn).sort((a,b)=>b.date.localeCompare(a.date))[0];
-            const liveC = lsLog.filter(l=>l.tank===tn&&l.status==="Live").reduce((s,l)=>s+(l.qty||1),0);
-            const isAct = activeTank===tn;
-            return (
-              <button key={tn} onClick={()=>setActiveTank(tn)} style={{background:isAct?`${tc}18`:"#07111f",border:`1.5px solid ${isAct?tc:tc+"44"}`,borderRadius:12,padding:"10px 8px",cursor:"pointer",textAlign:"left",width:"100%"}}>
+          {tanks.map(t=>{
+            const tn=tankName(t),tc=getTankColor(tn,tanks);
+            const last=params.filter(p=>p.tank===tn).sort((a,b)=>b.date.localeCompare(a.date))[0];
+            const liveC=lsLog.filter(l=>l.tank===tn&&l.status==="Live").reduce((s,l)=>s+(l.qty||1),0);
+            const isAct=activeTank===tn;
+            const hasAlert=last&&Object.entries(PARAM_SAFE).some(([k,s])=>last[k]!=null&&(last[k]<s.min||last[k]>s.max));
+            const dueC=tasks.filter(t=>t.tank===tn&&t.active&&t.next_due&&t.next_due<=TODAY_STR).length;
+            return(
+              <button key={tn} onClick={()=>setActiveTank(tn)} style={{background:isAct?`${tc}18`:"#07111f",border:`1.5px solid ${isAct?tc:tc+"44"}`,borderRadius:12,padding:"10px 8px",cursor:"pointer",textAlign:"left",width:"100%",position:"relative"}}>
+                {hasAlert&&<span style={{position:"absolute",top:5,right:5,fontSize:10}}>⚠️</span>}
+                {dueC>0&&!hasAlert&&<span style={{position:"absolute",top:5,right:5,fontSize:10}}>📅</span>}
                 <div style={{fontSize:16,marginBottom:2}}>{t.type==="saltwater"?"🪸":"🐡"}</div>
                 <div style={{fontSize:11,fontWeight:700,color:tc,marginBottom:2,lineHeight:1.3,wordBreak:"break-word"}}>{tn}</div>
-                <div style={{fontSize:10,color:"#475569",marginBottom:2}}>{t.volume_gal||t.size} · {liveC} live</div>
+                <div style={{fontSize:10,color:"#475569",marginBottom:2}}>{t.volume_gal||t.size}·{liveC} live</div>
                 {last?.nitrate!=null&&<div style={{fontSize:10,color:last.nitrate<=20?"#4ade80":"#f87171"}}>NO₃ {last.nitrate}{last.nitrate<=20?" ✓":" ⚠"}</div>}
                 {last?.date&&<div style={{fontSize:9,color:"#334155",marginTop:1}}>Last: {fmt(last.date)}</div>}
               </button>
@@ -317,28 +381,22 @@ function Dashboard({tanks,params,diary,lsLog,activeTank,setActiveTank,tankName})
         </div>
       </div>
 
-      {/* Tank strip */}
       <div style={{display:"flex",gap:6,marginBottom:14,flexWrap:"wrap"}}>
-        {tanks.map(t=>{
-          const tn=tankName(t), tc=getTankColor(tn,tanks);
-          return (
-            <button key={tn} onClick={()=>setActiveTank(tn)} style={{background:activeTank===tn?`${tc}22`:"#0d1a2d",border:`1.5px solid ${activeTank===tn?tc:"#1e3a5f"}`,borderRadius:10,padding:"6px 12px",cursor:"pointer",color:activeTank===tn?tc:"#64748b",fontWeight:600,fontSize:11,whiteSpace:"nowrap"}}>
-              {t.type==="saltwater"?"🪸":"🐡"} {tn}
-            </button>
-          );
-        })}
+        {tanks.map(t=>{const tn=tankName(t),tc=getTankColor(tn,tanks);return(
+          <button key={tn} onClick={()=>setActiveTank(tn)} style={{background:activeTank===tn?`${tc}22`:"#0d1a2d",border:`1.5px solid ${activeTank===tn?tc:"#1e3a5f"}`,borderRadius:10,padding:"6px 12px",cursor:"pointer",color:activeTank===tn?tc:"#64748b",fontWeight:600,fontSize:11,whiteSpace:"nowrap"}}>
+            {t.type==="saltwater"?"🪸":"🐡"} {tn}
+          </button>
+        );})}
       </div>
 
-      {/* 3 info cards */}
       <div className="grid-3" style={{marginBottom:14}}>
-        {/* Tank info */}
         <div style={{...S.card,borderTop:`3px solid ${color}`}}>
           <div style={{fontSize:11,color:"#64748b",fontWeight:600,textTransform:"uppercase",letterSpacing:".08em",marginBottom:8}}>Tank Info</div>
           <div style={{fontSize:17,fontWeight:700,color,marginBottom:2}}>{activeTank}</div>
-          <div style={{fontSize:12,color:"#94a3b8",marginBottom:2}}>{isSW?"🐠 Saltwater":"🐟 Freshwater"} · {tank?.volume_gal ? tank.volume_gal+"G" : tank?.size}</div>
-          {tank?.dimensions && <div style={{fontSize:11,color:"#475569",marginBottom:2}}>📐 {tank.dimensions}</div>}
-          {tank?.brand      && <div style={{fontSize:11,color:"#475569",marginBottom:2}}>🏷 {tank.brand}</div>}
-          {tank?.equipment  && <div style={{fontSize:11,color:"#64748b",marginBottom:2}}>⚙️ {tank.equipment}</div>}
+          <div style={{fontSize:12,color:"#94a3b8",marginBottom:2}}>{isSW?"🐠 Saltwater":"🐟 Freshwater"}·{tank?.volume_gal?tank.volume_gal+"G":tank?.size}</div>
+          {tank?.dimensions&&<div style={{fontSize:11,color:"#475569",marginBottom:2}}>📐 {tank.dimensions}</div>}
+          {tank?.brand&&<div style={{fontSize:11,color:"#475569",marginBottom:2}}>🏷 {tank.brand}</div>}
+          {tank?.equipment&&<div style={{fontSize:11,color:"#64748b",marginBottom:2}}>⚙️ {tank.equipment}</div>}
           <div style={{fontSize:11,color:"#475569",marginBottom:10}}>Since {fmt(tank?.setup_date||tank?.setup)}</div>
           <div style={{fontSize:10,color:"#64748b",fontWeight:600,textTransform:"uppercase",marginBottom:5}}>Live ({totalLive})</div>
           <div style={{display:"flex",flexDirection:"column",gap:3,maxHeight:150,overflowY:"auto"}}>
@@ -352,22 +410,22 @@ function Dashboard({tanks,params,diary,lsLog,activeTank,setActiveTank,tankName})
           </div>
         </div>
 
-        {/* Latest readings */}
         <div style={S.card}>
           <div style={{fontSize:11,color:"#64748b",fontWeight:600,textTransform:"uppercase",letterSpacing:".08em",marginBottom:8}}>
             Latest Readings {latest&&<span style={{color:"#475569",fontWeight:400}}>· {fmt(latest.date)}</span>}
           </div>
-          {latest ? (
+          {latest?(
             <div className="grid-2">
-              {pKeys.filter(p=>latest[p]!=null).map(p=>{
+              {(isSW?SW_PARAMS:FW_PARAMS).filter(p=>latest[p]!=null).map(p=>{
                 const v=latest[p],safe=PARAM_SAFE[p],ok=v>=safe.min&&v<=safe.max;
-                return (
-                  <div key={p} style={{background:"#07111f",borderRadius:8,padding:"8px 10px"}}>
+                return(
+                  <div key={p} style={{background:"#07111f",borderRadius:8,padding:"8px 10px",border:`1px solid ${ok?"transparent":"#f87171"}`}}>
                     <div style={{fontSize:10,color:"#475569",marginBottom:2}}>{PARAM_LABELS[p]}</div>
                     <div style={{display:"flex",alignItems:"center",gap:4}}>
                       <span style={{fontSize:16,fontWeight:700,color:ok?"#4ade80":"#f87171",fontFamily:"'DM Mono',monospace"}}>{v}</span>
-                      <span style={{fontSize:11,color:ok?"#4ade80":"#f87171"}}>{ok?"✓":"⚠"}</span>
+                      <span style={{fontSize:11}}>{ok?"✓":"⚠️"}</span>
                     </div>
+                    <div style={{fontSize:9,color:"#334155",marginTop:1}}>Safe: {safe.min}–{safe.max}</div>
                   </div>
                 );
               })}
@@ -375,10 +433,9 @@ function Dashboard({tanks,params,diary,lsLog,activeTank,setActiveTank,tankName})
           ):<div style={{color:"#475569",fontSize:13}}>No readings yet.</div>}
         </div>
 
-        {/* Recent maintenance */}
         <div style={S.card}>
           <div style={{fontSize:11,color:"#64748b",fontWeight:600,textTransform:"uppercase",letterSpacing:".08em",marginBottom:8}}>Maintenance — Last 4 Weeks</div>
-          {recentDiary.length>0 ? recentDiary.map((d,i)=>(
+          {recentDiary.length>0?recentDiary.map((d,i)=>(
             <div key={d.id||i} style={{borderBottom:i<recentDiary.length-1?"1px solid #0f2035":"none",paddingBottom:6,marginBottom:6}}>
               <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}>
                 <span style={{fontSize:10,background:`${CAT_COLORS[d.category]||"#64748b"}22`,color:CAT_COLORS[d.category]||"#64748b",borderRadius:4,padding:"1px 6px",fontWeight:600}}>{d.category}</span>
@@ -390,27 +447,47 @@ function Dashboard({tanks,params,diary,lsLog,activeTank,setActiveTank,tankName})
         </div>
       </div>
 
-      {/* Trend charts */}
       <div style={S.card}>
-        <div style={{fontSize:13,fontWeight:700,marginBottom:3,color:"#cbd5e1"}}>Parameter Trends — Last 4 Weeks</div>
-        <div style={{fontSize:11,color:"#475569",marginBottom:14}}>{recent.length===0?"No readings in last 4 weeks.":`${recent.length} readings · ${fmt(recent[0]?.date)} → ${fmt(recent[recent.length-1]?.date)}`}</div>
-        {recent.length>0 ? (
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:8}}>
+          <div>
+            <div style={{fontSize:13,fontWeight:700,color:"#cbd5e1",marginBottom:2}}>Parameter Trends</div>
+            <div style={{fontSize:11,color:"#475569"}}>{recent.length===0?"No readings in range.":`${recent.length} readings · ${fmt(recent[0]?.date)} → ${fmt(recent[recent.length-1]?.date)}`}</div>
+          </div>
+          <div style={{display:"flex",gap:5}}>
+            {DATE_RANGES.map(r=>(
+              <button key={r.label} onClick={()=>setRangeDays(r.days)} style={{background:rangeDays===r.days?"rgba(56,189,248,0.2)":"#07111f",border:`1px solid ${rangeDays===r.days?"#38bdf8":"#1e3a5f"}`,color:rangeDays===r.days?"#7dd3fc":"#64748b",borderRadius:7,padding:"4px 10px",cursor:"pointer",fontSize:12,fontWeight:700}}>
+                {r.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        {recent.length>0?(
           <div className="grid-2">
-            {pKeys.map(param=>{
-              const data=recent.filter(p=>p[param]!=null).map(p=>({date:fmt(p.date),value:Number(p[param])}));
+            {chartPairs.map(pair=>{
+              const data=recent.map(p=>({date:fmt(p.date),...Object.fromEntries(pair.keys.map(k=>[k,p[k]!=null?Number(p[k]):null]))})).filter(d=>pair.keys.some(k=>d[k]!=null));
               if(!data.length) return null;
-              const col=PARAM_SAFE[param]?.color||"#38bdf8";
-              return (
-                <div key={param}>
-                  <div style={{fontSize:11,color:"#64748b",fontWeight:600,marginBottom:4}}>{PARAM_LABELS[param]}</div>
-                  <ResponsiveContainer width="100%" height={130}>
-                    <LineChart data={data} margin={{top:4,right:6,left:-24,bottom:0}}>
+              const isMulti=pair.keys.length>1;
+              return(
+                <div key={pair.label}>
+                  <div style={{fontSize:11,color:"#64748b",fontWeight:600,marginBottom:6,display:"flex",alignItems:"center",gap:8}}>
+                    {pair.label}
+                    {isMulti&&pair.keys.map(k=><span key={k} style={{display:"inline-flex",alignItems:"center",gap:3,fontSize:10}}><span style={{width:10,height:2,background:PARAM_SAFE[k]?.color||"#38bdf8",display:"inline-block",borderRadius:1}}/>{k}</span>)}
+                  </div>
+                  <ResponsiveContainer width="100%" height={150}>
+                    <ComposedChart data={data} margin={{top:4,right:isMulti?12:6,left:-22,bottom:0}}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#0f2035"/>
                       <XAxis dataKey="date" tick={{fill:"#475569",fontSize:9}}/>
-                      <YAxis tick={{fill:"#475569",fontSize:9}}/>
+                      <YAxis yAxisId="left" tick={{fill:"#475569",fontSize:9}}/>
+                      {isMulti&&<YAxis yAxisId="right" orientation="right" tick={{fill:"#475569",fontSize:9}}/>}
                       <Tooltip contentStyle={{background:"#0a1628",border:"1px solid #1e3a5f",borderRadius:8,fontSize:11}}/>
-                      <Line type="monotone" dataKey="value" stroke={col} strokeWidth={2} dot={{fill:col,r:3}} activeDot={{r:5}}/>
-                    </LineChart>
+                      {pair.keys.map((k,ki)=>{const safe=PARAM_SAFE[k],yId=ki===0?"left":"right";return[
+                        <ReferenceLine key={k+"min"} yAxisId={yId} y={safe.min} stroke={safe.color} strokeDasharray="4 2" strokeOpacity={0.35}/>,
+                        <ReferenceLine key={k+"max"} yAxisId={yId} y={safe.max} stroke={safe.color} strokeDasharray="4 2" strokeOpacity={0.35}/>,
+                      ];})}
+                      {pair.keys.map((k,ki)=>(
+                        <Line key={k} yAxisId={ki===0?"left":"right"} type="monotone" dataKey={k} stroke={PARAM_SAFE[k]?.color||"#38bdf8"} strokeWidth={2} dot={{fill:PARAM_SAFE[k]?.color||"#38bdf8",r:3}} activeDot={{r:5}} connectNulls/>
+                      ))}
+                    </ComposedChart>
                   </ResponsiveContainer>
                 </div>
               );
@@ -421,6 +498,7 @@ function Dashboard({tanks,params,diary,lsLog,activeTank,setActiveTank,tankName})
     </div>
   );
 }
+
 
 // ─── Log Parameters ───────────────────────────────────────────────────────────
 function LogParams({tanks,params,setParams,showToast,tankName}) {
@@ -989,6 +1067,236 @@ function ManageTanks({tanks,setTanks,showToast,tankName,params,diary,lsLog}) {
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+// ─── Scheduler ────────────────────────────────────────────────────────────────
+function Scheduler({tanks,tasks,setTasks,showToast,tankName}) {
+  const blank={tank:"",title:"",category:"Maintenance",frequency_days:7,customDays:"",last_done:"",notes:""};
+  const [form,setForm]=useState(blank);
+  const [saving,setSaving]=useState(false);
+  const [filterTank,setFilterTank]=useState("All");
+  const [confirmId,setConfirmId]=useState(null);
+  const set=(k,v)=>setForm(p=>({...p,[k]:v}));
+
+  useEffect(()=>{ if(tanks.length&&!form.tank) set("tank",tankName(tanks[0])); },[tanks]);
+
+  function calcNextDue(lastDone,freqDays) {
+    if(!lastDone) { const d=new Date(); return d.toISOString().slice(0,10); }
+    const d=new Date(lastDone+"T12:00:00");
+    d.setDate(d.getDate()+freqDays);
+    return d.toISOString().slice(0,10);
+  }
+
+  async function addTask() {
+    if(!form.title.trim()){showToast("Task title is required","error");return;}
+    const freq=form.frequency_days===0?Number(form.customDays):Number(form.frequency_days);
+    if(!freq||freq<1){showToast("Please set a valid frequency","error");return;}
+    setSaving(true);
+    const entry={tank:form.tank,title:form.title.trim(),category:form.category,frequency_days:freq,last_done:form.last_done||null,next_due:calcNextDue(form.last_done,freq),notes:form.notes||null,active:true};
+    const {data,error}=await supabase.from("tasks").insert([entry]).select().single();
+    if(error){showToast("Save failed: "+error.message,"error");}
+    else{setTasks(prev=>[...prev,data]);setForm({...blank,tank:form.tank});showToast("Task scheduled!");}
+    setSaving(false);
+  }
+
+  async function markDone(task) {
+    const today=TODAY_STR;
+    const nextDue=calcNextDue(today,task.frequency_days);
+    const {data,error}=await supabase.from("tasks").update({last_done:today,next_due:nextDue}).eq("id",task.id).select().single();
+    if(error){showToast("Update failed: "+error.message,"error");}
+    else{setTasks(prev=>prev.map(t=>t.id===task.id?data:t));showToast(`"${task.title}" marked done! Next due: ${fmt(nextDue)}`);}
+  }
+
+  async function deleteTask(id) {
+    const {error}=await supabase.from("tasks").delete().eq("id",id);
+    if(error){showToast("Delete failed: "+error.message,"error");}
+    else{setTasks(prev=>prev.filter(t=>t.id!==id));showToast("Task removed.");setConfirmId(null);}
+  }
+
+  async function toggleActive(task) {
+    const {data,error}=await supabase.from("tasks").update({active:!task.active}).eq("id",task.id).select().single();
+    if(!error) setTasks(prev=>prev.map(t=>t.id===task.id?data:t));
+  }
+
+  const filtered=tasks.filter(t=>filterTank==="All"||t.tank===filterTank).sort((a,b)=>{
+    if(!a.next_due) return 1; if(!b.next_due) return -1;
+    return a.next_due.localeCompare(b.next_due);
+  });
+
+  const overdue=filtered.filter(t=>t.active&&t.next_due&&t.next_due<TODAY_STR);
+  const dueToday=filtered.filter(t=>t.active&&t.next_due===TODAY_STR);
+  const upcoming=filtered.filter(t=>t.active&&t.next_due>TODAY_STR);
+  const inactive=filtered.filter(t=>!t.active);
+
+  function daysUntil(dateStr) {
+    if(!dateStr) return null;
+    const diff=Math.ceil((new Date(dateStr+"T12:00:00")-new Date())/(1000*60*60*24));
+    return diff;
+  }
+
+  function TaskRow({t,showTank}) {
+    const days=daysUntil(t.next_due);
+    const isOverdue=days!==null&&days<0;
+    const isToday=days===0;
+    const tc=getTankColor(t.tank,tanks);
+    return(
+      <div style={{...S.card,padding:"12px 16px",borderLeft:`3px solid ${isOverdue?"#f87171":isToday?"#fbbf24":tc}`,display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,opacity:t.active?1:0.45,flexWrap:"wrap"}}>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:3}}>
+            <span style={{fontSize:13,fontWeight:700,color:"#e2e8f0"}}>{t.title}</span>
+            <span style={{fontSize:10,background:`${CAT_COLORS[t.category]||"#64748b"}22`,color:CAT_COLORS[t.category]||"#64748b",borderRadius:4,padding:"1px 7px",fontWeight:600}}>{t.category}</span>
+          </div>
+          <div style={{display:"flex",gap:12,flexWrap:"wrap",fontSize:10,color:"#475569"}}>
+            {showTank&&<span style={{color:tc,fontWeight:600}}>{t.tank}</span>}
+            <span>🔁 Every {t.frequency_days}d</span>
+            {t.last_done&&<span>Last: {fmt(t.last_done)}</span>}
+            {t.next_due&&<span style={{color:isOverdue?"#f87171":isToday?"#fbbf24":"#64748b",fontWeight:isOverdue||isToday?700:400}}>
+              {isOverdue?`⚠️ ${Math.abs(days)}d overdue`:isToday?"📅 Due today":`Next: ${fmt(t.next_due)} (${days}d)`}
+            </span>}
+            {t.notes&&<span style={{color:"#334155"}}>· {t.notes}</span>}
+          </div>
+        </div>
+        <div style={{display:"flex",gap:6,flexShrink:0}}>
+          <button onClick={()=>markDone(t)} style={{fontSize:11,background:"rgba(74,222,128,0.15)",border:"1px solid #4ade80",color:"#4ade80",borderRadius:7,padding:"5px 12px",cursor:"pointer",fontWeight:700,whiteSpace:"nowrap"}}>✓ Done</button>
+          <button onClick={()=>toggleActive(t)} style={{fontSize:11,background:"#07111f",border:"1px solid #1e3a5f",color:"#64748b",borderRadius:7,padding:"5px 10px",cursor:"pointer"}}>{t.active?"Pause":"Resume"}</button>
+          {confirmId===t.id?(
+            <span style={{display:"flex",gap:4}}>
+              <button onClick={()=>deleteTask(t.id)} style={{fontSize:11,background:"#7f1d1d",border:"none",color:"#fca5a5",borderRadius:6,padding:"5px 9px",cursor:"pointer",fontWeight:700}}>Confirm</button>
+              <button onClick={()=>setConfirmId(null)} style={{fontSize:11,background:"#1e3a5f",border:"none",color:"#94a3b8",borderRadius:6,padding:"5px 9px",cursor:"pointer"}}>✕</button>
+            </span>
+          ):(
+            <button onClick={()=>setConfirmId(t.id)} style={{fontSize:11,background:"rgba(248,113,113,0.1)",border:"1px solid #f87171",color:"#f87171",borderRadius:7,padding:"5px 9px",cursor:"pointer"}}>🗑</button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  const PRESET_TASKS=[
+    {title:"RO/DI Filter Change",     category:"Filter",    frequency_days:90},
+    {title:"Protein Skimmer Cup",      category:"Skimmer",   frequency_days:7},
+    {title:"Carbon/GFO Replace",       category:"Filter",    frequency_days:30},
+    {title:"Water Change",             category:"Water Change",frequency_days:7},
+    {title:"Filter Pad/Sock Replace",  category:"Filter",    frequency_days:14},
+    {title:"Test Parameters",          category:"Testing",   frequency_days:7},
+    {title:"Clean Return Pump",        category:"Equipment", frequency_days:90},
+    {title:"Dose Two-Part/Kalkwasser", category:"Dosing",    frequency_days:1},
+    {title:"Feed Coral",               category:"Coral",     frequency_days:3},
+    {title:"Scrape Algae",             category:"Maintenance",frequency_days:7},
+  ];
+
+  return(
+    <div>
+      <div style={{marginBottom:20}}>
+        <div style={{fontSize:20,fontWeight:700,color:"#e2e8f0",marginBottom:3}}>Maintenance Scheduler</div>
+        <div style={{fontSize:13,color:"#475569"}}>Set recurring reminders for tank maintenance tasks</div>
+      </div>
+
+      {/* Summary pills */}
+      <div className="grid-4" style={{marginBottom:20}}>
+        {[{label:"Overdue",val:tasks.filter(t=>t.active&&t.next_due&&t.next_due<TODAY_STR).length,color:"#f87171"},
+          {label:"Due Today",val:tasks.filter(t=>t.active&&t.next_due===TODAY_STR).length,color:"#fbbf24"},
+          {label:"Upcoming",val:tasks.filter(t=>t.active&&t.next_due>TODAY_STR).length,color:"#4ade80"},
+          {label:"Total Tasks",val:tasks.filter(t=>t.active).length,color:"#38bdf8"},
+        ].map(({label,val,color})=>(
+          <div key={label} style={{...S.card,borderTop:`2px solid ${color}`,padding:"12px 14px"}}>
+            <div style={{fontSize:10,color:"#64748b",fontWeight:600,textTransform:"uppercase",letterSpacing:".07em",marginBottom:3}}>{label}</div>
+            <div style={{fontSize:22,fontWeight:700,color,fontFamily:"'DM Mono',monospace"}}>{val}</div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{display:"grid",gridTemplateColumns:"1fr 380px",gap:18,alignItems:"start"}}>
+        {/* Task list */}
+        <div>
+          <div style={{display:"flex",gap:8,marginBottom:14,alignItems:"center",flexWrap:"wrap"}}>
+            <div style={{fontSize:13,fontWeight:700,color:"#cbd5e1"}}>Tasks</div>
+            <select value={filterTank} onChange={e=>setFilterTank(e.target.value)} style={{...S.sel,width:"auto",marginLeft:"auto"}}>
+              <option value="All">All Tanks</option>
+              {tanks.map(t=><option key={tankName(t)} value={tankName(t)}>{tankName(t)}</option>)}
+            </select>
+          </div>
+
+          {overdue.length>0&&(
+            <div style={{marginBottom:14}}>
+              <div style={{fontSize:11,fontWeight:700,color:"#f87171",textTransform:"uppercase",letterSpacing:".07em",marginBottom:8}}>⚠️ Overdue ({overdue.length})</div>
+              <div style={{display:"flex",flexDirection:"column",gap:7}}>{overdue.map(t=><TaskRow key={t.id} t={t} showTank={filterTank==="All"}/>)}</div>
+            </div>
+          )}
+          {dueToday.length>0&&(
+            <div style={{marginBottom:14}}>
+              <div style={{fontSize:11,fontWeight:700,color:"#fbbf24",textTransform:"uppercase",letterSpacing:".07em",marginBottom:8}}>📅 Due Today ({dueToday.length})</div>
+              <div style={{display:"flex",flexDirection:"column",gap:7}}>{dueToday.map(t=><TaskRow key={t.id} t={t} showTank={filterTank==="All"}/>)}</div>
+            </div>
+          )}
+          {upcoming.length>0&&(
+            <div style={{marginBottom:14}}>
+              <div style={{fontSize:11,fontWeight:700,color:"#4ade80",textTransform:"uppercase",letterSpacing:".07em",marginBottom:8}}>✅ Upcoming ({upcoming.length})</div>
+              <div style={{display:"flex",flexDirection:"column",gap:7}}>{upcoming.map(t=><TaskRow key={t.id} t={t} showTank={filterTank==="All"}/>)}</div>
+            </div>
+          )}
+          {inactive.length>0&&(
+            <div>
+              <div style={{fontSize:11,fontWeight:700,color:"#475569",textTransform:"uppercase",letterSpacing:".07em",marginBottom:8}}>⏸ Paused ({inactive.length})</div>
+              <div style={{display:"flex",flexDirection:"column",gap:7}}>{inactive.map(t=><TaskRow key={t.id} t={t} showTank={filterTank==="All"}/>)}</div>
+            </div>
+          )}
+          {filtered.length===0&&<div style={{...S.card,padding:24,color:"#334155",textAlign:"center",fontSize:13}}>No tasks yet. Add one from the form →</div>}
+        </div>
+
+        {/* Add task form + presets */}
+        <div style={{display:"flex",flexDirection:"column",gap:14}}>
+          <div style={{...S.card,borderRadius:16,padding:20,borderTop:"3px solid #38bdf8"}}>
+            <div style={{fontSize:13,fontWeight:700,color:"#7dd3fc",marginBottom:16}}>➕ Add Task</div>
+            <Field label="Tank">
+              <select value={form.tank} onChange={e=>set("tank",e.target.value)} style={S.sel}>
+                {tanks.map(t=><option key={tankName(t)} value={tankName(t)}>{tankName(t)}</option>)}
+              </select>
+            </Field>
+            <Field label="Task Name">
+              <input value={form.title} onChange={e=>set("title",e.target.value)} placeholder="e.g. Clean protein skimmer cup" style={S.inp}/>
+            </Field>
+            <Field label="Category">
+              <select value={form.category} onChange={e=>set("category",e.target.value)} style={S.sel}>
+                {TASK_CATS.map(c=><option key={c} value={c}>{c}</option>)}
+              </select>
+            </Field>
+            <Field label="Frequency">
+              <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:8}}>
+                {TASK_FREQS.map(f=>(
+                  <button key={f.label} onClick={()=>set("frequency_days",f.days)} style={{background:form.frequency_days===f.days?"rgba(56,189,248,0.2)":"#07111f",border:`1px solid ${form.frequency_days===f.days?"#38bdf8":"#1e3a5f"}`,color:form.frequency_days===f.days?"#7dd3fc":"#64748b",borderRadius:7,padding:"4px 9px",cursor:"pointer",fontSize:11,fontWeight:600}}>{f.label}</button>
+                ))}
+              </div>
+              {form.frequency_days===0&&<input type="number" min="1" value={form.customDays} onChange={e=>set("customDays",e.target.value)} placeholder="Days" style={S.inp}/>}
+            </Field>
+            <Field label="Last Done (optional)">
+              <input type="date" value={form.last_done} onChange={e=>set("last_done",e.target.value)} style={S.inp}/>
+            </Field>
+            <Field label="Notes">
+              <input value={form.notes} onChange={e=>set("notes",e.target.value)} placeholder="Any notes…" style={S.inp}/>
+            </Field>
+            <button onClick={addTask} disabled={saving} style={{...S.btn,width:"100%",opacity:saving?0.6:1,marginTop:4}}>
+              {saving?"💾 Saving…":"📅 Schedule Task"}
+            </button>
+          </div>
+
+          {/* Quick presets */}
+          <div style={{...S.card,borderRadius:14,padding:16}}>
+            <div style={{fontSize:12,fontWeight:700,color:"#cbd5e1",marginBottom:12}}>⚡ Quick Presets</div>
+            <div style={{display:"flex",flexDirection:"column",gap:5}}>
+              {PRESET_TASKS.map(p=>(
+                <button key={p.title} onClick={()=>setForm(prev=>({...prev,title:p.title,category:p.category,frequency_days:p.frequency_days}))}
+                  style={{background:"#07111f",border:"1px solid #1e3a5f",borderRadius:8,padding:"7px 12px",cursor:"pointer",textAlign:"left",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <span style={{fontSize:12,color:"#94a3b8"}}>{p.title}</span>
+                  <span style={{fontSize:10,color:"#475569",whiteSpace:"nowrap",marginLeft:6}}>every {p.frequency_days}d</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
