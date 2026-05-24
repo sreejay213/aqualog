@@ -657,7 +657,7 @@ function LSView({lsLog,setLsLog,showToast,tanks,tankName}) {
           <option value="All">All Tanks</option>
           {tanks.map(t=><option key={tankName(t)} value={tankName(t)}>{tankName(t)}</option>)}
         </select>
-        <div style={{display:"flex",gap:5"}}>
+        <div style={{display:"flex",gap:5}}>
           {["All","Live","Died","Removed"].map(s=>{const c=statusColor[s]||"#64748b";return<button key={s} onClick={()=>setFStatus(s)} style={{background:fStatus===s?`${c}22`:"#0d1a2d",border:`1.5px solid ${fStatus===s?c:"#1e3a5f"}`,color:fStatus===s?c:"#64748b",borderRadius:8,padding:"5px 11px",cursor:"pointer",fontSize:12,fontWeight:600}}>{s}</button>;})}
         </div>
         <span style={{fontSize:12,color:"#475569",marginLeft:"auto"}}>{list.length} entries</span>
