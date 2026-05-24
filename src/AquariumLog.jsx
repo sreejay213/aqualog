@@ -107,9 +107,6 @@ const TASK_FREQS = [
   {label:"Custom",   days:0},
 ];
 
-// ─── Anthropic API key ────────────────────────────────────────────────────────
-const ANTHROPIC_KEY = import.meta.env.VITE_ANTHROPIC_KEY;
-
 // ─── Statistics helpers ───────────────────────────────────────────────────────
 function mean(arr) { return arr.length ? arr.reduce((s,v)=>s+v,0)/arr.length : 0; }
 function stddev(arr) {
@@ -182,11 +179,10 @@ function detectAnomalies(vals, param, newVal) {
   return null;
 }
 
-// ─── Smart AI Summary (calls Anthropic API) ───────────────────────────────────
+// ─── Smart AI Summary (calls Vercel proxy → Anthropic) ───────────────────────
 async function fetchAISummary(tank, recentReadings, diaryEntries, lsLog) {
   const isSW = tank.type === "saltwater";
   const pKeys = isSW ? SW_PARAMS : FW_PARAMS;
-  const last5 = recentReadings.slice(-5);
   const paramSummary = pKeys.map(p=>{
     const vals=recentReadings.filter(r=>r[p]!=null).map(r=>Number(r[p]));
     if(!vals.length) return null;
@@ -226,14 +222,15 @@ Instructions:
 - Keep advice under 120 words total, use bullet points (•)
 - Do NOT use markdown headers or bold`;
 
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method:"POST",
-    headers:{"Content-Type":"application/json","x-api-key":ANTHROPIC_KEY,"anthropic-version":"2023-06-01"},
-    body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:300,messages:[{role:"user",content:prompt}]})
+  const response = await fetch("/api/summary", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt }),
   });
+
   const data = await response.json();
-  if(data.error) throw new Error(data.error.message);
-  return data.content[0].text;
+  if (data.error) throw new Error(data.error);
+  return data.text;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -1559,7 +1556,6 @@ function Insights({tanks,params,diary,lsLog,activeTank,setActiveTank,tankName}) 
         {!ranOnce&&!aiLoading&&(
           <div style={{fontSize:12,color:"#334155",padding:"8px 0"}}>
             Click "Generate Summary" to get AI advice tailored to your {tank} data.
-            {!ANTHROPIC_KEY&&<span style={{color:"#f87171",marginLeft:6}}>⚠️ Add VITE_ANTHROPIC_KEY to your Vercel env vars.</span>}
           </div>
         )}
       </div>
