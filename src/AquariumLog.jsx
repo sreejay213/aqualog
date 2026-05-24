@@ -109,7 +109,20 @@ function Spinner({msg="Loading from database…"}) {
   );
 }
 
-// ─── Global CSS ───────────────────────────────────────────────────────────────
+const TANK_ORDER = [
+  "5G Betta Tank","10G GloFish Tank","20G Gold Fish Tank",
+  "40G Community Tank","IM20 Reef Tank","RS250 Reef Tank",
+];
+function sortTanks(tanks) {
+  return [...tanks].sort((a,b) => {
+    const ai = TANK_ORDER.indexOf(a.name||a.id);
+    const bi = TANK_ORDER.indexOf(b.name||b.id);
+    if (ai === -1 && bi === -1) return (a.name||a.id).localeCompare(b.name||b.id);
+    if (ai === -1) return 1;
+    if (bi === -1) return -1;
+    return ai - bi;
+  });
+}
 const GLOBAL_CSS = `
   @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700&family=DM+Mono:wght@400;500&display=swap');
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -172,7 +185,7 @@ export default function App() {
         supabase.from("diary").select("*").order("date", {ascending:false}),
         supabase.from("livestock").select("*").order("date_added", {ascending:true}),
       ]);
-      const tankData = (tRes.data && tRes.data.length > 0) ? tRes.data : FALLBACK_TANKS;
+      const tankData = (tRes.data && tRes.data.length > 0) ? sortTanks(tRes.data) : FALLBACK_TANKS;
       setTanks(tankData);
       if (!activeTank && tankData.length > 0) setActiveTank(tankData[tankData.length-1].name || tankData[tankData.length-1].id);
       setParams(pRes.data || []);
@@ -638,9 +651,25 @@ function LSView({lsLog,setLsLog,showToast,tanks,tankName}) {
   const [fStatus,setFStatus]=useState("Live");
   const [confirmId,setConfirmId]=useState(null);
   const [saving,setSaving]=useState(false);
+  const [editId,setEditId]=useState(null);
+  const [editVals,setEditVals]=useState({});
   const statusColor={Live:"#4ade80",Died:"#f87171",Removed:"#fb923c"};
 
   const list=lsLog.filter(l=>fTank==="All"||l.tank===fTank).filter(l=>fStatus==="All"||l.status===fStatus).sort((a,b)=>(a.tank+a.name).localeCompare(b.tank+b.name));
+
+  function startEdit(l) {
+    setEditId(l.id);
+    setEditVals({date_added:l.date_added||"",date_died:l.date_died||"",status:l.status||"Live",qty:l.qty||1,tank:l.tank,comments:l.comments||""});
+  }
+
+  async function saveEdit(id) {
+    setSaving(true);
+    const updates={date_added:editVals.date_added||null,date_died:editVals.date_died||null,status:editVals.status,qty:Number(editVals.qty),tank:editVals.tank,comments:editVals.comments||null};
+    const {data,error}=await supabase.from("livestock").update(updates).eq("id",id).select().single();
+    if(error){showToast("Update failed: "+error.message,"error");}
+    else{setLsLog(prev=>prev.map(l=>l.id===id?data:l));setEditId(null);showToast("Record updated!");}
+    setSaving(false);
+  }
 
   async function markDead(id) {
     setSaving(true);
@@ -662,6 +691,7 @@ function LSView({lsLog,setLsLog,showToast,tanks,tankName}) {
         </div>
         <span style={{fontSize:12,color:"#475569",marginLeft:"auto"}}>{list.length} entries</span>
       </div>
+
       <div className="grid-4" style={{marginBottom:16}}>
         {[{label:"Total Live",val:lsLog.filter(l=>l.status==="Live").reduce((s,l)=>s+(l.qty||1),0),color:"#4ade80"},{label:"Tanks",val:tanks.length,color:"#38bdf8"},{label:"Died",val:lsLog.filter(l=>l.status==="Died").length,color:"#f87171"},{label:"Removed",val:lsLog.filter(l=>l.status==="Removed").length,color:"#fb923c"}].map(({label,val,color})=>(
           <div key={label} style={{...S.card,borderTop:`2px solid ${color}`,padding:"12px 14px"}}>
@@ -670,46 +700,84 @@ function LSView({lsLog,setLsLog,showToast,tanks,tankName}) {
           </div>
         ))}
       </div>
-      <div style={{...S.card,padding:0,overflow:"auto"}}>
-        <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
-          <thead><tr style={{background:"#07111f",fontSize:10,color:"#64748b",textTransform:"uppercase",letterSpacing:".06em"}}>
-            <th style={{padding:"9px 14px",textAlign:"left",fontWeight:700}}>Name</th>
-            <th style={{padding:"9px 14px",textAlign:"left",fontWeight:700}} className="ls-table-col-hide">Tank</th>
-            <th style={{padding:"9px 14px",textAlign:"left",fontWeight:700}} className="ls-table-col-hide">Type</th>
-            <th style={{padding:"9px 14px",textAlign:"center",fontWeight:700}}>Qty</th>
-            <th style={{padding:"9px 14px",textAlign:"left",fontWeight:700}}>Added</th>
-            <th style={{padding:"9px 14px",textAlign:"left",fontWeight:700}} className="ls-table-col-hide">Died</th>
-            <th style={{padding:"9px 14px",textAlign:"left",fontWeight:700}}>Status</th>
-          </tr></thead>
-          <tbody>
-            {list.length===0&&<tr><td colSpan={7} style={{padding:24,color:"#334155",textAlign:"center"}}>No entries match filters.</td></tr>}
-            {list.map((l,i)=>(
-              <tr key={l.id||i} style={{borderBottom:"1px solid #0f2035",background:i%2===0?"transparent":"rgba(7,17,31,0.4)"}}>
-                <td style={{padding:"9px 14px"}}>
-                  <div style={{fontWeight:600,color:"#e2e8f0"}}>{l.name}</div>
-                  <div style={{fontSize:10,color:getTankColor(l.tank,tanks),marginTop:1}} className="hide-desktop">{l.tank}</div>
-                </td>
-                <td style={{padding:"9px 14px",color:getTankColor(l.tank,tanks),fontWeight:600}} className="ls-table-col-hide">{l.tank}</td>
-                <td style={{padding:"9px 14px",color:"#64748b"}} className="ls-table-col-hide">{l.type}</td>
-                <td style={{padding:"9px 14px",textAlign:"center",color:"#94a3b8",fontFamily:"'DM Mono',monospace"}}>{l.qty}</td>
-                <td style={{padding:"9px 14px",color:"#475569"}}>{fmt(l.date_added)}</td>
-                <td style={{padding:"9px 14px",color:l.date_died?"#f87171":"#334155"}} className="ls-table-col-hide">{l.date_died?fmt(l.date_died):"—"}</td>
-                <td style={{padding:"9px 14px"}}>
-                  {l.status==="Live"?(confirmId===l.id?(
-                    <span style={{display:"flex",gap:4}}>
-                      <button onClick={()=>markDead(l.id)} disabled={saving} style={{fontSize:10,background:"#7f1d1d",border:"none",color:"#fca5a5",borderRadius:5,padding:"3px 7px",cursor:"pointer",fontWeight:700}}>✓</button>
-                      <button onClick={()=>setConfirmId(null)} style={{fontSize:10,background:"#1e3a5f",border:"none",color:"#94a3b8",borderRadius:5,padding:"3px 7px",cursor:"pointer"}}>✕</button>
-                    </span>
-                  ):(
-                    <button onClick={()=>setConfirmId(l.id)} style={{fontSize:10,background:"rgba(74,222,128,0.15)",border:"1px solid #4ade80",color:"#4ade80",borderRadius:6,padding:"3px 9px",cursor:"pointer",fontWeight:700}}>Live</button>
-                  )):(
-                    <span style={{fontSize:10,background:`${statusColor[l.status]||"#94a3b8"}22`,color:statusColor[l.status]||"#94a3b8",borderRadius:6,padding:"3px 9px",fontWeight:700}}>{l.status}</span>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+
+      <div style={{display:"flex",flexDirection:"column",gap:8}}>
+        {list.length===0&&<div style={{...S.card,padding:24,color:"#334155",textAlign:"center",fontSize:13}}>No entries match filters.</div>}
+        {list.map((l,i)=>{
+          const tc=getTankColor(l.tank,tanks);
+          const isEdit=editId===l.id;
+          return (
+            <div key={l.id||i} style={{...S.card,padding:0,overflow:"hidden",borderLeft:`3px solid ${tc}`}}>
+              {/* Normal row */}
+              {!isEdit&&(
+                <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 50px 90px 90px 70px 80px",gap:0,padding:"10px 14px",alignItems:"center"}}>
+                  <div>
+                    <div style={{fontSize:13,color:"#e2e8f0",fontWeight:600}}>{l.qty>1?`${l.qty}× `:""}{l.name}</div>
+                    <div style={{fontSize:10,color:"#475569"}}>{l.type}</div>
+                  </div>
+                  <div style={{fontSize:11,color:tc,fontWeight:600}}>{l.tank}</div>
+                  <div style={{fontSize:11,color:"#64748b"}}>{l.type}</div>
+                  <div style={{fontSize:12,color:"#94a3b8",fontFamily:"'DM Mono',monospace",textAlign:"center"}}>{l.qty}</div>
+                  <div style={{fontSize:11,color:"#475569"}}>{fmt(l.date_added)}</div>
+                  <div style={{fontSize:11,color:l.date_died?"#f87171":"#334155"}}>{l.date_died?fmt(l.date_died):"—"}</div>
+                  <div>
+                    {l.status==="Live"?(confirmId===l.id?(
+                      <span style={{display:"flex",gap:3}}>
+                        <button onClick={()=>markDead(l.id)} disabled={saving} style={{fontSize:10,background:"#7f1d1d",border:"none",color:"#fca5a5",borderRadius:5,padding:"3px 6px",cursor:"pointer",fontWeight:700}}>✓</button>
+                        <button onClick={()=>setConfirmId(null)} style={{fontSize:10,background:"#1e3a5f",border:"none",color:"#94a3b8",borderRadius:5,padding:"3px 6px",cursor:"pointer"}}>✕</button>
+                      </span>
+                    ):(
+                      <button onClick={()=>setConfirmId(l.id)} style={{fontSize:10,background:"rgba(74,222,128,0.15)",border:"1px solid #4ade80",color:"#4ade80",borderRadius:6,padding:"3px 8px",cursor:"pointer",fontWeight:700}}>Live</button>
+                    )):(
+                      <span style={{fontSize:10,background:`${statusColor[l.status]||"#94a3b8"}22`,color:statusColor[l.status]||"#94a3b8",borderRadius:6,padding:"3px 8px",fontWeight:700}}>{l.status}</span>
+                    )}
+                  </div>
+                  <div>
+                    <button onClick={()=>startEdit(l)} style={{fontSize:10,background:"rgba(56,189,248,0.1)",border:"1px solid #38bdf8",color:"#38bdf8",borderRadius:6,padding:"3px 8px",cursor:"pointer",fontWeight:600}}>✏️ Edit</button>
+                  </div>
+                </div>
+              )}
+              {/* Edit row */}
+              {isEdit&&(
+                <div style={{padding:16,background:"#07111f"}}>
+                  <div style={{fontSize:12,fontWeight:700,color:"#7dd3fc",marginBottom:12}}>✏️ Editing: <span style={{color:"#e2e8f0"}}>{l.name}</span></div>
+                  <div className="grid-2" style={{marginBottom:12}}>
+                    <Field label="Status">
+                      <select value={editVals.status} onChange={e=>setEditVals(p=>({...p,status:e.target.value}))} style={S.sel}>
+                        <option value="Live">Live</option>
+                        <option value="Died">Died</option>
+                        <option value="Removed">Removed</option>
+                      </select>
+                    </Field>
+                    <Field label="Quantity">
+                      <input type="number" min="1" value={editVals.qty} onChange={e=>setEditVals(p=>({...p,qty:e.target.value}))} style={S.inp}/>
+                    </Field>
+                  </div>
+                  <div className="grid-2" style={{marginBottom:12}}>
+                    <Field label="Date Added">
+                      <input type="date" value={editVals.date_added} onChange={e=>setEditVals(p=>({...p,date_added:e.target.value}))} style={S.inp}/>
+                    </Field>
+                    <Field label="Date Died / Removed">
+                      <input type="date" value={editVals.date_died} onChange={e=>setEditVals(p=>({...p,date_died:e.target.value}))} style={S.inp}/>
+                    </Field>
+                  </div>
+                  <Field label="Tank">
+                    <select value={editVals.tank} onChange={e=>setEditVals(p=>({...p,tank:e.target.value}))} style={S.sel}>
+                      {tanks.map(t=><option key={tankName(t)} value={tankName(t)}>{tankName(t)}</option>)}
+                    </select>
+                  </Field>
+                  <Field label="Comments">
+                    <input value={editVals.comments} onChange={e=>setEditVals(p=>({...p,comments:e.target.value}))} placeholder="Notes…" style={S.inp}/>
+                  </Field>
+                  <div style={{display:"flex",gap:8,marginTop:4}}>
+                    <button onClick={()=>saveEdit(l.id)} disabled={saving} style={{...S.btn,padding:"8px 20px",fontSize:13,opacity:saving?0.6:1}}>{saving?"💾 Saving…":"💾 Save"}</button>
+                    <button onClick={()=>setEditId(null)} style={{background:"none",border:"1px solid #334155",color:"#64748b",borderRadius:8,padding:"8px 16px",cursor:"pointer",fontSize:13}}>Cancel</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -818,7 +886,15 @@ function ManageTanks({tanks,setTanks,showToast,tankName,params,diary,lsLog}) {
   const [saving,setSaving]=useState(false);
   const [delConfirm,setDelConfirm]=useState(null);
   const [deleting,setDeleting]=useState(false);
+  const [editTank,setEditTank]=useState(null);
   const set=(k,v)=>setForm(p=>({...p,[k]:v}));
+
+  function startEdit(t) {
+    setEditTank(tankName(t));
+    setForm({name:t.name||t.id||"",type:t.type||"freshwater",volume_gal:t.volume_gal||"",dimensions:t.dimensions||"",brand:t.brand||"",location:t.location||"",equipment:t.equipment||"",notes:t.notes||"",setup_date:t.setup_date||t.setup||TODAY_STR});
+    window.scrollTo({top:0,behavior:"smooth"});
+  }
+  function cancelEdit(){setEditTank(null);setForm(blank);}
 
   async function addTank() {
     if(!form.name.trim()){showToast("Tank name is required","error");return;}
@@ -827,7 +903,16 @@ function ManageTanks({tanks,setTanks,showToast,tankName,params,diary,lsLog}) {
     const entry={name:form.name.trim(),type:form.type,volume_gal:form.volume_gal?Number(form.volume_gal):null,dimensions:form.dimensions||null,brand:form.brand||null,location:form.location||null,equipment:form.equipment||null,notes:form.notes||null,setup_date:form.setup_date||TODAY_STR};
     const {data,error}=await supabase.from("tanks").insert([entry]).select().single();
     if(error){showToast("Save failed: "+error.message,"error");}
-    else{setTanks(prev=>[...prev,data]);setForm(blank);showToast(`${data.name} added!`);}
+    else{setTanks(prev=>sortTanks([...prev,data]));setForm(blank);showToast(`${data.name} added!`);}
+    setSaving(false);
+  }
+
+  async function saveTankEdit() {
+    setSaving(true);
+    const updates={type:form.type,volume_gal:form.volume_gal?Number(form.volume_gal):null,dimensions:form.dimensions||null,brand:form.brand||null,location:form.location||null,equipment:form.equipment||null,notes:form.notes||null,setup_date:form.setup_date||TODAY_STR};
+    const {data,error}=await supabase.from("tanks").update(updates).eq("name",editTank).select().single();
+    if(error){showToast("Update failed: "+error.message,"error");}
+    else{setTanks(prev=>sortTanks(prev.map(t=>tankName(t)===editTank?data:t)));cancelEdit();showToast("Tank updated!");}
     setSaving(false);
   }
 
@@ -839,76 +924,39 @@ function ManageTanks({tanks,setTanks,showToast,tankName,params,diary,lsLog}) {
     setDelConfirm(null);setDeleting(false);
   }
 
-  const typeOptions=[
-    {val:"freshwater",label:"🐟 Freshwater"},
-    {val:"saltwater", label:"🐠 Saltwater / Reef"},
-    {val:"brackish",  label:"🌊 Brackish"},
-    {val:"planted",   label:"🌱 Planted"},
-    {val:"quarantine",label:"🏥 Quarantine"},
-  ];
+  const typeOptions=[{val:"freshwater",label:"🐟 Freshwater"},{val:"saltwater",label:"🐠 Saltwater / Reef"},{val:"brackish",label:"🌊 Brackish"},{val:"planted",label:"🌱 Planted"},{val:"quarantine",label:"🏥 Quarantine"}];
+  const isEditing=!!editTank;
 
   return (
     <div>
-      <div style={{marginBottom:20}}><div style={{fontSize:20,fontWeight:700,color:"#e2e8f0",marginBottom:3}}>Manage Tanks</div><div style={{fontSize:13,color:"#475569"}}>Add new tanks or remove existing ones</div></div>
-
-      {/* Add new tank form */}
-      <div style={{...S.card,borderRadius:16,padding:22,marginBottom:20,borderTop:"3px solid #38bdf8"}}>
-        <div style={{fontSize:14,fontWeight:700,color:"#7dd3fc",marginBottom:18}}>➕ Add New Tank</div>
-
-        <div className="grid-2">
-          <Field label="Tank Name *">
-            <input value={form.name} onChange={e=>set("name",e.target.value)} placeholder="e.g. 75G Planted Tank" style={S.inp}/>
-          </Field>
-          <Field label="Type *">
-            <select value={form.type} onChange={e=>set("type",e.target.value)} style={S.sel}>
-              {typeOptions.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}
-            </select>
-          </Field>
+      <div style={{marginBottom:20}}><div style={{fontSize:20,fontWeight:700,color:"#e2e8f0",marginBottom:3}}>Manage Tanks</div><div style={{fontSize:13,color:"#475569"}}>Add, edit or remove tanks</div></div>
+      <div style={{...S.card,borderRadius:16,padding:22,marginBottom:20,borderTop:`3px solid ${isEditing?"#fbbf24":"#38bdf8"}`}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
+          <div style={{fontSize:14,fontWeight:700,color:isEditing?"#fbbf24":"#7dd3fc"}}>{isEditing?`✏️ Editing: ${editTank}":"➕ Add New Tank"}</div>
+          {isEditing&&<button onClick={cancelEdit} style={{fontSize:12,background:"none",border:"1px solid #334155",color:"#64748b",borderRadius:8,padding:"4px 12px",cursor:"pointer"}}>✕ Cancel</button>}
         </div>
-
         <div className="grid-2">
-          <Field label="Volume (Gallons)">
-            <input type="number" value={form.volume_gal} onChange={e=>set("volume_gal",e.target.value)} placeholder="e.g. 75" style={S.inp}/>
-          </Field>
-          <Field label="Setup Date">
-            <input type="date" value={form.setup_date} onChange={e=>set("setup_date",e.target.value)} style={S.inp}/>
-          </Field>
+          <Field label="Tank Name *"><input value={form.name} onChange={e=>set("name",e.target.value)} placeholder="e.g. 75G Planted Tank" style={{...S.inp,opacity:isEditing?0.5:1}} readOnly={isEditing}/></Field>
+          <Field label="Type *"><select value={form.type} onChange={e=>set("type",e.target.value)} style={S.sel}>{typeOptions.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</select></Field>
         </div>
-
         <div className="grid-2">
-          <Field label="Dimensions (L × W × H)">
-            <input value={form.dimensions} onChange={e=>set("dimensions",e.target.value)} placeholder='e.g. 48" × 18" × 21"' style={S.inp}/>
-          </Field>
-          <Field label="Brand / Model">
-            <input value={form.brand} onChange={e=>set("brand",e.target.value)} placeholder="e.g. Red Sea Reefer 250, Innovative Marine 20" style={S.inp}/>
-          </Field>
+          <Field label="Volume (Gallons)"><input type="number" value={form.volume_gal} onChange={e=>set("volume_gal",e.target.value)} placeholder="e.g. 75" style={S.inp}/></Field>
+          <Field label="Setup Date"><input type="date" value={form.setup_date} onChange={e=>set("setup_date",e.target.value)} style={S.inp}/></Field>
         </div>
-
         <div className="grid-2">
-          <Field label="Location in Home">
-            <input value={form.location} onChange={e=>set("location",e.target.value)} placeholder="e.g. Living Room, Office" style={S.inp}/>
-          </Field>
-          <Field label="Brand / Model">
-            <input value={form.brand} onChange={e=>set("brand",e.target.value)} placeholder="e.g. Red Sea Reefer 250, Innovative Marine 20" style={S.inp}/>
-          </Field>
+          <Field label="Dimensions (L × W × H)"><input value={form.dimensions} onChange={e=>set("dimensions",e.target.value)} placeholder='e.g. 48" × 18" × 21"' style={S.inp}/></Field>
+          <Field label="Brand / Model"><input value={form.brand} onChange={e=>set("brand",e.target.value)} placeholder="e.g. Red Sea Reefer 250" style={S.inp}/></Field>
         </div>
-
-        <Field label="Equipment">
-          <textarea value={form.equipment} onChange={e=>set("equipment",e.target.value)} rows={2}
-            placeholder="e.g. Heater, Protein Skimmer, Return Pump, Wavemaker, Dosing Pump, UV Sterilizer…"
-            style={{...S.inp,resize:"vertical"}}/>
-        </Field>
-
-        <Field label="Notes">
-          <input value={form.notes} onChange={e=>set("notes",e.target.value)} placeholder="Any other notes about this tank" style={S.inp}/>
-        </Field>
-
-        <button onClick={addTank} disabled={saving} style={{...S.btn,opacity:saving?0.6:1,marginTop:4,width:"100%"}}>
-          {saving?"💾 Saving…":"➕ Add Tank"}
+        <div className="grid-2">
+          <Field label="Location in Home"><input value={form.location} onChange={e=>set("location",e.target.value)} placeholder="e.g. Living Room" style={S.inp}/></Field>
+          <Field label="Notes"><input value={form.notes} onChange={e=>set("notes",e.target.value)} placeholder="Any other notes" style={S.inp}/></Field>
+        </div>
+        <Field label="Equipment"><textarea value={form.equipment} onChange={e=>set("equipment",e.target.value)} rows={2} placeholder="e.g. Heater, Protein Skimmer, Return Pump, Wavemaker, Dosing Pump…" style={{...S.inp,resize:"vertical"}}/></Field>
+        <button onClick={isEditing?saveTankEdit:addTank} disabled={saving} style={{...S.btn,opacity:saving?0.6:1,marginTop:8,width:"100%",background:isEditing?"linear-gradient(135deg,#92400e,#f59e0b)":undefined}}>
+          {saving?"💾 Saving…":isEditing?"💾 Save Changes":"➕ Add Tank"}
         </button>
       </div>
 
-      {/* Existing tanks */}
       <div style={{fontSize:14,fontWeight:700,color:"#cbd5e1",marginBottom:14}}>Existing Tanks ({tanks.length})</div>
       <div className="grid-2">
         {tanks.map(t=>{
@@ -916,36 +964,28 @@ function ManageTanks({tanks,setTanks,showToast,tankName,params,diary,lsLog}) {
           const liveCount=lsLog.filter(l=>l.tank===tn&&l.status==="Live").reduce((s,l)=>s+(l.qty||1),0);
           const paramCount=params.filter(p=>p.tank===tn).length;
           const diaryCount=diary.filter(d=>d.tank===tn).length;
+          const isBeingEdited=editTank===tn;
           return (
-            <div key={tn} style={{...S.card,borderRadius:14,borderLeft:`3px solid ${tc}`,padding:18}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
+            <div key={tn} style={{...S.card,borderRadius:14,borderLeft:`3px solid ${isBeingEdited?"#fbbf24":tc}`,padding:18,opacity:editTank&&!isBeingEdited?0.5:1,transition:"opacity .2s"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
                 <div>
-                  <div style={{fontSize:15,fontWeight:700,color:tc,marginBottom:2}}>{tn}</div>
+                  <div style={{fontSize:15,fontWeight:700,color:isBeingEdited?"#fbbf24":tc,marginBottom:2}}>{tn}{isBeingEdited&&<span style={{fontSize:10,color:"#fbbf24",marginLeft:6}}>✏️ editing</span>}</div>
                   <div style={{fontSize:12,color:"#64748b"}}>{t.type==="saltwater"?"🐠 Saltwater":t.type==="brackish"?"🌊 Brackish":t.type==="planted"?"🌱 Planted":t.type==="quarantine"?"🏥 Quarantine":"🐟 Freshwater"} · {t.volume_gal?t.volume_gal+"G":t.size||"—"}</div>
-                  {t.dimensions&&<div style={{fontSize:11,color:"#475569",marginTop:2}}>📐 {t.dimensions}</div>}
+                  {t.dimensions&&<div style={{fontSize:11,color:"#475569",marginTop:1}}>📐 {t.dimensions}</div>}
                   {t.brand&&<div style={{fontSize:11,color:"#475569"}}>🏷 {t.brand}</div>}
                   {t.location&&<div style={{fontSize:11,color:"#475569"}}>📍 {t.location}</div>}
-                  <div style={{fontSize:11,color:"#475569",marginTop:2}}>Setup: {fmt(t.setup_date||t.setup)}</div>
+                  <div style={{fontSize:11,color:"#475569",marginTop:1}}>Setup: {fmt(t.setup_date||t.setup)}</div>
                 </div>
-                <div style={{display:"flex",flexDirection:"column",gap:6,alignItems:"flex-end"}}>
-                  <div style={{display:"flex",gap:8,fontSize:10,color:"#475569"}}>
-                    <span>🐟 {liveCount} live</span>
-                    <span>💧 {paramCount} readings</span>
-                    <span>🔧 {diaryCount} logs</span>
+                <div style={{display:"flex",flexDirection:"column",gap:5,alignItems:"flex-end"}}>
+                  <div style={{display:"flex",gap:6,fontSize:10,color:"#475569"}}><span>🐟{liveCount}</span><span>💧{paramCount}</span><span>🔧{diaryCount}</span></div>
+                  <div style={{display:"flex",gap:5}}>
+                    <button onClick={()=>isBeingEdited?cancelEdit():startEdit(t)} style={{fontSize:11,background:isBeingEdited?"rgba(251,191,36,0.1)":"rgba(56,189,248,0.1)",border:`1px solid ${isBeingEdited?"#fbbf24":"#38bdf8"}`,color:isBeingEdited?"#fbbf24":"#38bdf8",borderRadius:6,padding:"4px 10px",cursor:"pointer",fontWeight:600}}>{isBeingEdited?"✕ Cancel":"✏️ Edit"}</button>
+                    {delConfirm===tn?(<div style={{display:"flex",gap:4}}><button onClick={()=>deleteTank(tn)} disabled={deleting} style={{fontSize:11,background:"#7f1d1d",border:"none",color:"#fca5a5",borderRadius:6,padding:"4px 8px",cursor:"pointer",fontWeight:700}}>{deleting?"…":"Confirm"}</button><button onClick={()=>setDelConfirm(null)} style={{fontSize:11,background:"#1e3a5f",border:"none",color:"#94a3b8",borderRadius:6,padding:"4px 8px",cursor:"pointer"}}>✕</button></div>):(<button onClick={()=>setDelConfirm(tn)} style={{fontSize:11,background:"rgba(248,113,113,0.1)",border:"1px solid #f87171",color:"#f87171",borderRadius:6,padding:"4px 10px",cursor:"pointer",fontWeight:600}}>🗑</button>)}
                   </div>
-                  {delConfirm===tn ? (
-                    <div style={{display:"flex",gap:6,alignItems:"center"}}>
-                      <span style={{fontSize:11,color:"#f87171"}}>Delete all data?</span>
-                      <button onClick={()=>deleteTank(tn)} disabled={deleting} style={{fontSize:11,background:"#7f1d1d",border:"none",color:"#fca5a5",borderRadius:6,padding:"4px 10px",cursor:"pointer",fontWeight:700}}>{deleting?"…":"Yes, delete"}</button>
-                      <button onClick={()=>setDelConfirm(null)} style={{fontSize:11,background:"#1e3a5f",border:"none",color:"#94a3b8",borderRadius:6,padding:"4px 10px",cursor:"pointer"}}>Cancel</button>
-                    </div>
-                  ) : (
-                    <button onClick={()=>setDelConfirm(tn)} style={{fontSize:11,background:"rgba(248,113,113,0.1)",border:"1px solid #f87171",color:"#f87171",borderRadius:6,padding:"4px 12px",cursor:"pointer",fontWeight:600}}>🗑 Remove Tank</button>
-                  )}
                 </div>
               </div>
-              {t.equipment&&<div style={{fontSize:11,color:"#64748b",background:"#07111f",borderRadius:6,padding:"6px 10px",marginTop:6}}><span style={{color:"#475569",fontWeight:600}}>⚙️ Equipment: </span>{t.equipment}</div>}
-              {t.notes&&<div style={{fontSize:11,color:"#475569",background:"#07111f",borderRadius:6,padding:"6px 10px",marginTop:4}}>{t.notes}</div>}
+              {t.equipment&&<div style={{fontSize:11,color:"#64748b",background:"#07111f",borderRadius:6,padding:"5px 10px",marginTop:4}}>⚙️ {t.equipment}</div>}
+              {t.notes&&<div style={{fontSize:11,color:"#475569",background:"#07111f",borderRadius:6,padding:"5px 10px",marginTop:4}}>{t.notes}</div>}
             </div>
           );
         })}
