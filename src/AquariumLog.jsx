@@ -62,6 +62,7 @@ const PARAM_SAFE = {
 
 const NAV = [
   {id:"Dashboard",   icon:"📊"},
+  {id:"Insights",    icon:"🧠"},
   {id:"Parameters",  icon:"💧"},
   {id:"Maintenance", icon:"🔧"},
   {id:"Livestock",   icon:"🐟"},
@@ -106,8 +107,134 @@ const TASK_FREQS = [
   {label:"Custom",   days:0},
 ];
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-function fmt(d) {
+// ─── Anthropic API key ────────────────────────────────────────────────────────
+const ANTHROPIC_KEY = import.meta.env.VITE_ANTHROPIC_KEY;
+
+// ─── Statistics helpers ───────────────────────────────────────────────────────
+function mean(arr) { return arr.length ? arr.reduce((s,v)=>s+v,0)/arr.length : 0; }
+function stddev(arr) {
+  if(arr.length<2) return 0;
+  const m=mean(arr);
+  return Math.sqrt(arr.reduce((s,v)=>s+(v-m)**2,0)/(arr.length-1));
+}
+function zScore(val,arr) {
+  const sd=stddev(arr);
+  return sd===0 ? 0 : Math.abs((val-mean(arr))/sd);
+}
+function linearRegression(points) {
+  // points: [{x:dayIndex, y:value}]
+  if(points.length<2) return null;
+  const n=points.length;
+  const sumX=points.reduce((s,p)=>s+p.x,0);
+  const sumY=points.reduce((s,p)=>s+p.y,0);
+  const sumXY=points.reduce((s,p)=>s+p.x*p.y,0);
+  const sumX2=points.reduce((s,p)=>s+p.x**2,0);
+  const denom=n*sumX2-sumX**2;
+  if(denom===0) return null;
+  const slope=(n*sumXY-sumX*sumY)/denom;
+  const intercept=(sumY-slope*sumX)/n;
+  return {slope,intercept};
+}
+function stabilityScore(values) {
+  if(values.length<2) return null;
+  const sd=stddev(values);
+  const m=mean(values);
+  if(m===0) return 100;
+  const cv=(sd/m)*100; // coefficient of variation
+  const score=Math.max(0,Math.min(100,100-cv*3));
+  return Math.round(score);
+}
+function trendForecast(readings,param,daysAhead=7) {
+  const vals=readings.filter(r=>r[param]!=null).map((r,i)=>({x:i,y:Number(r[param]),date:r.date}));
+  if(vals.length<3) return null;
+  const reg=linearRegression(vals);
+  if(!reg) return null;
+  const forecast=reg.intercept+reg.slope*(vals.length-1+daysAhead);
+  const targetDate=new Date();
+  targetDate.setDate(targetDate.getDate()+daysAhead);
+  const dayName=targetDate.toLocaleDateString("en-US",{weekday:"long"});
+  return {value:Math.round(forecast*100)/100, dayName, slope:reg.slope, daysAhead};
+}
+function rateOfChange(readings,param) {
+  // Returns % change per reading over last 3 readings
+  const vals=readings.filter(r=>r[param]!=null).map(r=>Number(r[param])).slice(-4);
+  if(vals.length<2) return null;
+  const recent=vals.slice(-2);
+  const older=vals.slice(0,-2);
+  if(!older.length) return null;
+  const avgRecent=mean(recent);
+  const avgOlder=mean(older);
+  if(avgOlder===0) return null;
+  return ((avgRecent-avgOlder)/avgOlder)*100;
+}
+
+// ─── Anomaly detection ────────────────────────────────────────────────────────
+function detectAnomalies(vals, param, newVal) {
+  if(!newVal || isNaN(parseFloat(newVal))) return null;
+  const v = parseFloat(newVal);
+  const history = vals.filter(r=>r[param]!=null).map(r=>Number(r[param]));
+  if(history.length < 3) return null; // not enough history
+  const z = zScore(v, history);
+  const m = mean(history);
+  const pct = m !== 0 ? Math.abs((v-m)/m)*100 : 0;
+  if(z > 3) return { level:"critical", z:Math.round(z*10)/10, pct:Math.round(pct), avg:Math.round(m*100)/100 };
+  if(z > 2) return { level:"warning",  z:Math.round(z*10)/10, pct:Math.round(pct), avg:Math.round(m*100)/100 };
+  return null;
+}
+
+// ─── Smart AI Summary (calls Anthropic API) ───────────────────────────────────
+async function fetchAISummary(tank, recentReadings, diaryEntries, lsLog) {
+  const isSW = tank.type === "saltwater";
+  const pKeys = isSW ? SW_PARAMS : FW_PARAMS;
+  const last5 = recentReadings.slice(-5);
+  const paramSummary = pKeys.map(p=>{
+    const vals=recentReadings.filter(r=>r[p]!=null).map(r=>Number(r[p]));
+    if(!vals.length) return null;
+    const forecast=trendForecast(recentReadings,p,7);
+    const stability=stabilityScore(vals);
+    const roc=rateOfChange(recentReadings,p);
+    const safe=PARAM_SAFE[p];
+    const latest=vals[vals.length-1];
+    return {
+      param:p, label:PARAM_LABELS[p],
+      latest, avg:Math.round(mean(vals)*100)/100,
+      stability, forecast,
+      roc:roc?Math.round(roc*10)/10:null,
+      outOfRange:latest<safe.min||latest>safe.max,
+      safe:`${safe.min}–${safe.max}`
+    };
+  }).filter(Boolean);
+
+  const livestock=lsLog.filter(l=>l.tank===tank.name&&l.status==="Live").map(l=>l.name);
+  const recentMaint=diaryEntries.filter(d=>d.tank===tank.name).slice(0,5).map(d=>`${d.date}: ${d.category} — ${d.notes}`).join("\n");
+
+  const prompt = `You are an expert aquarium advisor. Analyze this tank data and give practical, specific advice in 3-4 bullet points. Be direct, conversational, and mention specific values. Focus on what needs attention.
+
+Tank: ${tank.name} (${tank.type}, ${tank.volume_gal||"?"}G)
+Live inhabitants: ${livestock.join(", ")||"unknown"}
+
+Recent parameter data:
+${paramSummary.map(p=>`- ${p.label}: latest=${p.latest}, avg=${p.avg}, stable=${p.stability}%${p.roc?`, trend=${p.roc>0?"+":""}${p.roc}%`:""}${p.outOfRange?" ⚠️ OUT OF RANGE":""}${p.forecast?`, forecast=${p.forecast.value} by ${p.forecast.dayName}`:""} (safe: ${p.safe})`).join("\n")}
+
+Recent maintenance:
+${recentMaint||"None logged"}
+
+Instructions:
+- Mention specific parameter values and what they mean for the inhabitants
+- If any parameter is trending toward the danger zone, warn with the forecast
+- If things look great, say so but suggest proactive steps
+- Keep advice under 120 words total, use bullet points (•)
+- Do NOT use markdown headers or bold`;
+
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method:"POST",
+    headers:{"Content-Type":"application/json","x-api-key":ANTHROPIC_KEY,"anthropic-version":"2023-06-01"},
+    body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:300,messages:[{role:"user",content:prompt}]})
+  });
+  const data = await response.json();
+  if(data.error) throw new Error(data.error.message);
+  return data.content[0].text;
+}
   if (!d) return "";
   return new Date(d+"T12:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric"});
 }
@@ -304,6 +431,7 @@ export default function App() {
         {loading ? <Spinner/> : (
           <>
             {page==="Dashboard"    && <Dashboard    {...pageProps}/>}
+            {page==="Insights"     && <Insights     {...pageProps}/>}
             {page==="Parameters"   && <LogParams    {...pageProps}/>}
             {page==="Maintenance"  && <LogMaint     {...pageProps}/>}
             {page==="Livestock"    && <LogLivestock {...pageProps}/>}
@@ -538,12 +666,25 @@ function LogParams({tanks,params,setParams,showToast,tankName}) {
           {pKeys.map(p=>{
             const v=vals[p],n=parseFloat(v),safe=PARAM_SAFE[p];
             const ok=v!==""&&v!==undefined&&!isNaN(n)?(n>=safe.min&&n<=safe.max):null;
+            const anomaly=v&&!isNaN(n)?detectAnomalies(params.filter(r=>r.tank===tank),p,v):null;
             return (
               <Field key={p} label={PARAM_LABELS[p]}>
                 <div style={{position:"relative"}}>
-                  <input type="number" step="0.01" placeholder={`Safe: ${safe.min}–${safe.max}`} value={v||""} onChange={e=>setVals(prev=>({...prev,[p]:e.target.value}))} style={{...S.inp,borderColor:ok===false?"#f87171":ok===true?"#4ade80":"#1e3a5f",paddingRight:28}}/>
-                  {ok!==null&&<span style={{position:"absolute",right:9,top:"50%",transform:"translateY(-50%)",fontSize:13}}>{ok?"✓":"⚠"}</span>}
+                  <input type="number" step="0.01" placeholder={`Safe: ${safe.min}–${safe.max}`} value={v||""} onChange={e=>setVals(prev=>({...prev,[p]:e.target.value}))}
+                    style={{...S.inp,borderColor:anomaly?.level==="critical"?"#f97316":ok===false?"#f87171":ok===true?"#4ade80":"#1e3a5f",paddingRight:28}}/>
+                  {ok!==null&&!anomaly&&<span style={{position:"absolute",right:9,top:"50%",transform:"translateY(-50%)",fontSize:13}}>{ok?"✓":"⚠"}</span>}
+                  {anomaly&&<span style={{position:"absolute",right:9,top:"50%",transform:"translateY(-50%)",fontSize:13}}>🤔</span>}
                 </div>
+                {anomaly&&(
+                  <div style={{marginTop:5,background:anomaly.level==="critical"?"rgba(249,115,22,0.12)":"rgba(251,191,36,0.1)",border:`1px solid ${anomaly.level==="critical"?"#f97316":"#fbbf24"}`,borderRadius:7,padding:"7px 10px",fontSize:11}}>
+                    <div style={{fontWeight:700,color:anomaly.level==="critical"?"#fb923c":"#fbbf24",marginBottom:2}}>
+                      {anomaly.level==="critical"?"⚠️ Possible Typo Detected":"🤔 Unusual Value"}
+                    </div>
+                    <div style={{color:"#94a3b8"}}>
+                      This is <strong style={{color:"#e2e8f0"}}>{anomaly.pct}% {parseFloat(v)>anomaly.avg?"above":"below"}</strong> your average of <strong style={{color:"#e2e8f0"}}>{anomaly.avg}</strong> (z-score: {anomaly.z}). Did you mean <strong style={{color:"#7dd3fc"}}>{Math.round(anomaly.avg*10)/10}</strong> instead?
+                    </div>
+                  </div>
+                )}
               </Field>
             );
           })}
@@ -1297,6 +1438,179 @@ function Scheduler({tanks,tasks,setTasks,showToast,tankName}) {
             </div>
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Insights ─────────────────────────────────────────────────────────────────
+function Insights({tanks,params,diary,lsLog,activeTank,setActiveTank,tankName}) {
+  const [tank,  setTankSel] = useState(activeTank||"");
+  const [aiText,setAiText]  = useState("");
+  const [aiLoading,setAiLoading]=useState(false);
+  const [aiError,setAiError]=useState("");
+  const [ranOnce,setRanOnce]=useState(false);
+
+  useEffect(()=>{ if(!tank&&tanks.length) setTankSel(activeTank||tankName(tanks[0])); },[tanks,activeTank]);
+
+  const tankObj  = tanks.find(t=>(t.name||t.id)===tank);
+  const isSW     = tankObj?.type==="saltwater";
+  const pKeys    = isSW ? SW_PARAMS : FW_PARAMS;
+  const readings = params.filter(p=>p.tank===tank).sort((a,b)=>a.date.localeCompare(b.date));
+  const latest   = readings[readings.length-1];
+  const color    = getTankColor(tank,tanks);
+
+  async function runSummary() {
+    if(!tankObj||!readings.length){setAiError("Not enough data to analyse yet.");return;}
+    setAiLoading(true);setAiText("");setAiError("");setRanOnce(true);
+    try {
+      const text=await fetchAISummary(tankObj,readings,diary,lsLog);
+      setAiText(text);
+    } catch(e) {
+      setAiError("AI error: "+e.message+". Check your VITE_ANTHROPIC_KEY env var.");
+    }
+    setAiLoading(false);
+  }
+
+  // ── Per-parameter analytics ──
+  const analytics = pKeys.map(p=>{
+    const vals=readings.filter(r=>r[p]!=null).map(r=>Number(r[p]));
+    if(!vals.length) return null;
+    const safe=PARAM_SAFE[p];
+    const latest_v=vals[vals.length-1];
+    const avg=Math.round(mean(vals)*100)/100;
+    const stability=stabilityScore(vals);
+    const forecast=trendForecast(readings,p,7);
+    const roc=rateOfChange(readings,p);
+    const inRange=latest_v>=safe.min&&latest_v<=safe.max;
+    const pctFromSafe=latest_v<safe.min?(((safe.min-latest_v)/safe.min)*100).toFixed(1):latest_v>safe.max?(((latest_v-safe.max)/safe.max)*100).toFixed(1):0;
+    // rising/falling flag
+    const rising=roc!==null&&roc>5;
+    const falling=roc!==null&&roc<-5;
+    const forecastOORange=forecast&&(forecast.value<safe.min||forecast.value>safe.max);
+    return {p,label:PARAM_LABELS[p],latest:latest_v,avg,stability,forecast,roc,inRange,pctFromSafe,rising,falling,forecastOORange,color:safe.color};
+  }).filter(Boolean);
+
+  function StabilityBar({score}) {
+    if(score===null) return null;
+    const col=score>=80?"#4ade80":score>=60?"#fbbf24":"#f87171";
+    const label=score>=80?"High":score>=60?"Moderate":"Low";
+    return(
+      <div style={{marginTop:4}}>
+        <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+          <span style={{fontSize:10,color:"#475569"}}>Stability</span>
+          <span style={{fontSize:10,color:col,fontWeight:700}}>{score}% — {label}</span>
+        </div>
+        <div style={{height:4,background:"#0f2035",borderRadius:2,overflow:"hidden"}}>
+          <div style={{height:"100%",width:`${score}%`,background:col,borderRadius:2,transition:"width .4s"}}/>
+        </div>
+      </div>
+    );
+  }
+
+  return(
+    <div>
+      <div style={{marginBottom:20}}>
+        <div style={{fontSize:20,fontWeight:700,color:"#e2e8f0",marginBottom:3}}>🧠 AI Insights</div>
+        <div style={{fontSize:13,color:"#475569"}}>Smart analysis, anomaly detection, trend forecasts, and stability scores</div>
+      </div>
+
+      {/* Tank selector */}
+      <div style={{display:"flex",gap:8,marginBottom:20,flexWrap:"wrap",alignItems:"center"}}>
+        {tanks.map(t=>{const tn=tankName(t),tc=getTankColor(tn,tanks);return(
+          <button key={tn} onClick={()=>{setTankSel(tn);setActiveTank(tn);setAiText("");setRanOnce(false);}}
+            style={{background:tank===tn?`${tc}22`:"#0d1a2d",border:`1.5px solid ${tank===tn?tc:"#1e3a5f"}`,borderRadius:10,padding:"6px 14px",cursor:"pointer",color:tank===tn?tc:"#64748b",fontWeight:600,fontSize:12,whiteSpace:"nowrap"}}>
+            {t.type==="saltwater"?"🪸":"🐡"} {tn}
+          </button>
+        );})}
+      </div>
+
+      {/* ── Smart AI Summary Card ── */}
+      <div style={{...S.card,borderTop:`3px solid ${color}`,marginBottom:18}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:8}}>
+          <div>
+            <div style={{fontSize:14,fontWeight:700,color:"#e2e8f0",marginBottom:2}}>🤖 Smart Summary — {tank}</div>
+            <div style={{fontSize:11,color:"#475569"}}>AI-powered advice based on your actual parameter history</div>
+          </div>
+          <button onClick={runSummary} disabled={aiLoading||!readings.length}
+            style={{...S.btn,padding:"8px 20px",fontSize:13,opacity:aiLoading||!readings.length?0.6:1,background:"linear-gradient(135deg,#581c87,#7c3aed)"}}>
+            {aiLoading?"🧠 Analysing…":"✨ Generate Summary"}
+          </button>
+        </div>
+        {aiLoading&&(
+          <div style={{display:"flex",alignItems:"center",gap:10,padding:"16px 0",color:"#64748b",fontSize:13}}>
+            <div style={{width:18,height:18,border:"2px solid #1e3a5f",borderTopColor:"#7c3aed",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
+            Analysing {readings.length} readings across {pKeys.length} parameters…
+          </div>
+        )}
+        {aiError&&<div style={{background:"rgba(248,113,113,0.1)",border:"1px solid #f87171",borderRadius:8,padding:"10px 14px",fontSize:12,color:"#f87171"}}>{aiError}</div>}
+        {aiText&&(
+          <div style={{background:"rgba(124,58,237,0.08)",border:"1px solid rgba(124,58,237,0.3)",borderRadius:10,padding:"14px 16px"}}>
+            {aiText.split("\n").filter(Boolean).map((line,i)=>(
+              <div key={i} style={{fontSize:13,color:"#cbd5e1",lineHeight:1.6,marginBottom:line.startsWith("•")?6:0}}>
+                {line.startsWith("•")?<><span style={{color:"#a78bfa",marginRight:6}}>•</span>{line.slice(1).trim()}</>:line}
+              </div>
+            ))}
+          </div>
+        )}
+        {!ranOnce&&!aiLoading&&(
+          <div style={{fontSize:12,color:"#334155",padding:"8px 0"}}>
+            Click "Generate Summary" to get AI advice tailored to your {tank} data.
+            {!ANTHROPIC_KEY&&<span style={{color:"#f87171",marginLeft:6}}>⚠️ Add VITE_ANTHROPIC_KEY to your Vercel env vars.</span>}
+          </div>
+        )}
+      </div>
+
+      {/* ── Per-parameter analytics grid ── */}
+      <div style={{fontSize:13,fontWeight:700,color:"#cbd5e1",marginBottom:14}}>Parameter Analytics — {tank}</div>
+      {analytics.length===0&&<div style={{...S.card,padding:24,color:"#334155",fontSize:13,textAlign:"center"}}>No parameter data yet for this tank.</div>}
+      <div className="grid-2">
+        {analytics.map(a=>(
+          <div key={a.p} style={{...S.card,borderLeft:`3px solid ${a.color}`,padding:18,borderTop:a.forecastOORange?"2px solid #f87171":a.rising&&!a.inRange?"1px solid #f97316":"1px solid #1e3a5f"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
+              <div>
+                <div style={{fontSize:12,color:"#64748b",fontWeight:600,textTransform:"uppercase",letterSpacing:".06em",marginBottom:4}}>{a.label}</div>
+                <div style={{display:"flex",alignItems:"baseline",gap:6}}>
+                  <span style={{fontSize:28,fontWeight:700,color:a.inRange?"#e2e8f0":"#f87171",fontFamily:"'DM Mono',monospace"}}>{a.latest}</span>
+                  {!a.inRange&&<span style={{fontSize:11,color:"#f87171",fontWeight:600}}>{a.pctFromSafe}% out of range</span>}
+                </div>
+                <div style={{fontSize:11,color:"#475569",marginTop:2}}>avg {a.avg} · safe {PARAM_SAFE[a.p].min}–{PARAM_SAFE[a.p].max}</div>
+              </div>
+              <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4}}>
+                <span style={{fontSize:18}}>{a.inRange?"✅":a.pctFromSafe>20?"🚨":"⚠️"}</span>
+                {a.roc!==null&&(
+                  <span style={{fontSize:11,color:Math.abs(a.roc)<5?"#475569":a.roc>0?"#f87171":"#38bdf8",fontWeight:600,fontFamily:"'DM Mono',monospace"}}>
+                    {a.roc>0?"↑":"↓"}{Math.abs(a.roc)}%
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <StabilityBar score={a.stability}/>
+
+            {/* Rate of change alert */}
+            {a.roc!==null&&Math.abs(a.roc)>10&&(
+              <div style={{marginTop:8,background:a.roc>0?"rgba(248,113,113,0.08)":"rgba(56,189,248,0.08)",border:`1px solid ${a.roc>0?"#f87171":"#38bdf8"}`,borderRadius:7,padding:"6px 10px",fontSize:11,color:a.roc>0?"#f87171":"#38bdf8"}}>
+                ⚡ {a.label} is <strong>{a.roc>0?"rising":"falling"} faster than usual</strong> ({a.roc>0?"+":""}{a.roc}% vs prior readings)
+              </div>
+            )}
+
+            {/* Trend forecast */}
+            {a.forecast&&(
+              <div style={{marginTop:8,background:a.forecastOORange?"rgba(248,113,113,0.08)":"rgba(56,189,248,0.06)",border:`1px solid ${a.forecastOORange?"rgba(248,113,113,0.4)":"#1e3a5f"}`,borderRadius:7,padding:"6px 10px",fontSize:11}}>
+                <span style={{color:"#64748b"}}>📈 Forecast: </span>
+                <span style={{color:a.forecastOORange?"#f87171":"#7dd3fc",fontWeight:600}}>{a.forecast.value}</span>
+                <span style={{color:"#475569"}}> by {a.forecast.dayName}</span>
+                {a.forecastOORange&&<span style={{color:"#f87171",marginLeft:4,fontWeight:600}}>⚠️ heading out of range</span>}
+                {a.forecast.slope!==0&&(
+                  <span style={{color:"#334155",marginLeft:6}}>
+                    ({a.forecast.slope>0?"↑":"↓"}{Math.abs(Math.round(a.forecast.slope*100)/100)}/reading)
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+        ))}
       </div>
     </div>
   );
