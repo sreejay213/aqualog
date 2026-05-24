@@ -235,6 +235,9 @@ Instructions:
   if(data.error) throw new Error(data.error.message);
   return data.content[0].text;
 }
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function fmt(d) {
   if (!d) return "";
   return new Date(d+"T12:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric"});
 }
