@@ -932,7 +932,7 @@ function ManageTanks({tanks,setTanks,showToast,tankName,params,diary,lsLog}) {
       <div style={{marginBottom:20}}><div style={{fontSize:20,fontWeight:700,color:"#e2e8f0",marginBottom:3}}>Manage Tanks</div><div style={{fontSize:13,color:"#475569"}}>Add, edit or remove tanks</div></div>
       <div style={{...S.card,borderRadius:16,padding:22,marginBottom:20,borderTop:`3px solid ${isEditing?"#fbbf24":"#38bdf8"}`}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
-          <div style={{fontSize:14,fontWeight:700,color:isEditing?"#fbbf24":"#7dd3fc"}}>{isEditing?`✏️ Editing: ${editTank}":"➕ Add New Tank"}</div>
+          <div style={{fontSize:14,fontWeight:700,color:isEditing?"#fbbf24":"#7dd3fc"}}>{isEditing?`✏️ Editing: ${editTank}`:"➕ Add New Tank"}</div>
           {isEditing&&<button onClick={cancelEdit} style={{fontSize:12,background:"none",border:"1px solid #334155",color:"#64748b",borderRadius:8,padding:"4px 12px",cursor:"pointer"}}>✕ Cancel</button>}
         </div>
         <div className="grid-2">
