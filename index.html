@@ -2,32 +2,43 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
 
     <!-- PWA / Home Screen -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
     <meta name="apple-mobile-web-app-title" content="AquaLog" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="theme-color" content="#080d1a" />
 
-    <!-- App icons (inline SVG as data URI - fish icon) -->
-    <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'%3E%3Crect width='180' height='180' rx='40' fill='%23080d1a'/%3E%3Crect width='180' height='180' rx='40' fill='url(%23g)'/%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%230a1628'/%3E%3Cstop offset='1' stop-color='%230d2040'/%3E%3C/linearGradient%3E%3C/defs%3E%3Ccircle cx='90' cy='75' r='52' fill='%230369a1' opacity='.18'/%3E%3Ccircle cx='90' cy='75' r='38' fill='%230ea5e9' opacity='.15'/%3E%3Ctext x='90' y='98' font-size='64' text-anchor='middle' font-family='system-ui'>🐠%3C/text%3E%3Ctext x='90' y='152' font-size='18' text-anchor='middle' font-family='system-ui,sans-serif' font-weight='700' fill='%237dd3fc' letter-spacing='2'%3EAQUALOG%3C/text%3E%3C/svg%3E"/>
-
+    <!-- App icons -->
+    <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'%3E%3Crect width='180' height='180' rx='40' fill='%23080d1a'/%3E%3Ccircle cx='90' cy='75' r='52' fill='%230369a1' opacity='.18'/%3E%3Ctext x='90' y='98' font-size='64' text-anchor='middle' font-family='system-ui'%3E🐠%3C/text%3E%3Ctext x='90' y='152' font-size='18' text-anchor='middle' font-family='system-ui,sans-serif' font-weight='700' fill='%237dd3fc' letter-spacing='2'%3EAQUALOG%3C/text%3E%3C/svg%3E"/>
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23080d1a'/%3E%3Ctext x='16' y='24' font-size='20' text-anchor='middle' font-family='system-ui'%3E🐠%3C/text%3E%3C/svg%3E"/>
-
-    <!-- Open Graph / Share preview -->
-    <meta property="og:title" content="AquaLog" />
-    <meta property="og:description" content="Smart aquarium tracking for your tanks" />
-    <meta property="og:type" content="website" />
 
     <title>AquaLog 🐠</title>
 
     <style>
-      /* Prevent flash of white on load */
-      html, body { background: #080d1a; margin: 0; padding: 0; }
-      /* Safe area insets for iPhone notch */
-      body { padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
+      *, *::before, *::after { box-sizing: border-box; }
+      html {
+        background: #080d1a;
+        width: 100%;
+        height: 100%;
+        overflow-x: hidden;
+      }
+      body {
+        background: #080d1a;
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        min-height: 100%;
+        overflow-x: hidden;
+        -webkit-text-size-adjust: 100%;
+      }
+      #root {
+        width: 100%;
+        min-height: 100vh;
+        background: #080d1a;
+      }
     </style>
   </head>
   <body>

@@ -426,11 +426,11 @@ export default function App() {
   const pageProps = { tanks, params, setParams, diary, setDiary, lsLog, setLsLog, tasks, setTasks, activeTank, setActiveTank, showToast, setTanks, tankName, loadAll };
 
   return (
-    <div style={{minHeight:"100vh",background:"#080d1a",color:"#e2e8f0",fontFamily:"'DM Sans','Segoe UI',sans-serif",maxWidth:"100vw",overflowX:"hidden"}}>
+    <div style={{minHeight:"100vh",width:"100%",background:"#080d1a",color:"#e2e8f0",fontFamily:"'DM Sans','Segoe UI',sans-serif",overflowX:"hidden"}}>
       <style>{GLOBAL_CSS}</style>
 
       {/* ── Desktop Header ── */}
-      <header style={{background:"linear-gradient(135deg,#0a1628,#0d2040)",borderBottom:"1px solid #1e3a5f",padding:"0 16px",display:"flex",alignItems:"center",gap:12,height:52,position:"sticky",top:0,zIndex:100,maxWidth:"100vw"}}>
+      <header style={{background:"linear-gradient(135deg,#0a1628,#0d2040)",borderBottom:"1px solid #1e3a5f",padding:"0 16px",display:"flex",alignItems:"center",gap:12,height:52,position:"sticky",top:0,zIndex:100,width:"100%"}}>
         <span style={{fontSize:22}}>🐠</span>
         <span style={{fontWeight:700,fontSize:16,color:"#7dd3fc",whiteSpace:"nowrap"}}>AquaLog</span>
         <span style={{color:"#334155"}} className="hide-mobile">|</span>
