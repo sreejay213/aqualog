@@ -348,7 +348,7 @@ export default function App() {
   const [diary, setDiary]       = useState([]);
   const [lsLog, setLsLog]       = useState([]);
   const [tasks, setTasks]       = useState([]);
-  const [loading, setLoading]   = useState(true);
+  const [loading, setLoading]   = useState(false);
   const [activeTank, setActiveTank] = useState(FALLBACK_TANKS[FALLBACK_TANKS.length-1].id);
   const [toast, setToast]       = useState(null);
   const [toastType, setToastType] = useState("success");
@@ -396,7 +396,6 @@ export default function App() {
   }, [tasks]);
 
   const loadAll = useCallback(async () => {
-    setLoading(true);
     try {
       const [tRes, pRes, dRes, lRes, tkRes] = await Promise.all([
         supabase.from("tanks").select("*").order("setup_date", {ascending:true}),
@@ -408,7 +407,6 @@ export default function App() {
       const tankData = (tRes.data && tRes.data.length > 0) ? sortTanks(tRes.data) : FALLBACK_TANKS;
       setTanks(tankData);
       setActiveTank(prev => {
-        // Keep current selection if it exists in new data, otherwise pick last tank
         const exists = tankData.find(t => (t.name||t.id) === prev);
         return exists ? prev : (tankData[tankData.length-1].name || tankData[tankData.length-1].id);
       });
@@ -419,7 +417,6 @@ export default function App() {
     } catch (err) {
       showToast("Load error: "+err.message, "error");
     }
-    setLoading(false);
   }, []);
 
   useEffect(() => { loadAll(); }, [loadAll]);
@@ -480,19 +477,17 @@ export default function App() {
 
       {/* Main content */}
       <main style={{maxWidth:"100%",margin:"0 auto",padding:"16px 20px",width:"100%",boxSizing:"border-box"}}>
-        {loading ? <Spinner/> : (
-          <>
-            {page==="Dashboard"    && <Dashboard    {...pageProps}/>}
-            {page==="Insights"     && <Insights     {...pageProps}/>}
-            {page==="Parameters"   && <LogParams    {...pageProps}/>}
-            {page==="Maintenance"  && <LogMaint     {...pageProps}/>}
-            {page==="Livestock"    && <LogLivestock {...pageProps}/>}
-            {page==="Scheduler"    && <Scheduler    {...pageProps}/>}
-            {page==="My Tanks"     && <MyTanks      {...pageProps}/>}
-            {page==="Diary"        && <DiaryPage    {...pageProps}/>}
-            {page==="Manage Tanks" && <ManageTanks  {...pageProps}/>}
-          </>
-        )}
+        <>
+          {page==="Dashboard"    && <Dashboard    {...pageProps}/>}
+          {page==="Insights"     && <Insights     {...pageProps}/>}
+          {page==="Parameters"   && <LogParams    {...pageProps}/>}
+          {page==="Maintenance"  && <LogMaint     {...pageProps}/>}
+          {page==="Livestock"    && <LogLivestock {...pageProps}/>}
+          {page==="Scheduler"    && <Scheduler    {...pageProps}/>}
+          {page==="My Tanks"     && <MyTanks      {...pageProps}/>}
+          {page==="Diary"        && <DiaryPage    {...pageProps}/>}
+          {page==="Manage Tanks" && <ManageTanks  {...pageProps}/>}
+        </>
       </main>
     </div>
   );
