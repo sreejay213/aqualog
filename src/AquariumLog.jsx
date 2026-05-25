@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ComposedChart, ReferenceLine, Legend } from "recharts";
 
@@ -340,6 +340,29 @@ const GLOBAL_CSS = `
   }
 `;
 
+// ─── Error Boundary ───────────────────────────────────────────────────────────
+class ErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(e) { return { error: e }; }
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{minHeight:"100vh",background:"#080d1a",color:"#e2e8f0",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24,fontFamily:"sans-serif"}}>
+          <div style={{fontSize:40,marginBottom:16}}>🐠</div>
+          <div style={{fontSize:18,fontWeight:700,color:"#f87171",marginBottom:8}}>Something went wrong</div>
+          <div style={{fontSize:12,color:"#475569",background:"#07111f",borderRadius:8,padding:"12px 16px",maxWidth:400,wordBreak:"break-all",marginBottom:16}}>
+            {this.state.error.message}
+          </div>
+          <button onClick={()=>window.location.reload()} style={{background:"#0369a1",border:"none",borderRadius:8,color:"#fff",padding:"10px 24px",cursor:"pointer",fontSize:14,fontWeight:700}}>
+            Reload App
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 // ─── Main App ─────────────────────────────────────────────────────────────────
 export default function App() {
   const [page, setPage]         = useState("Dashboard");
@@ -361,7 +384,7 @@ export default function App() {
 
   // ── Request notification permission and schedule daily reminders ──
   useEffect(() => {
-    if ("Notification" in window && Notification.permission === "default") {
+    if (typeof Notification !== "undefined" && Notification.permission === "default") {
       Notification.requestPermission();
     }
   }, []);
@@ -369,7 +392,7 @@ export default function App() {
   // ── Fire notifications for due/overdue tasks once per session ──
   useEffect(() => {
     if (!tasks.length) return;
-    if (Notification.permission !== "granted") return;
+    if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
     const sessionKey = "aqualog_notified_" + TODAY_STR;
     if (sessionStorage.getItem(sessionKey)) return;
     sessionStorage.setItem(sessionKey, "1");
@@ -378,8 +401,6 @@ export default function App() {
     if (due.length > 0) {
       new Notification("🐠 AquaLog — Tasks Due Today", {
         body: due.map(t => `• ${t.title} (${t.tank})`).join("\n"),
-        icon: "/favicon.svg",
-        badge: "/favicon.svg",
         tag: "aqualog-due",
       });
     }
@@ -387,8 +408,6 @@ export default function App() {
       setTimeout(() => {
         new Notification("⚠️ AquaLog — Overdue Tasks", {
           body: overdue.map(t => `• ${t.title} (${t.tank}) — ${Math.abs(Math.ceil((new Date(t.next_due+"T12:00:00")-new Date())/(1000*60*60*24)))}d overdue`).join("\n"),
-          icon: "/favicon.svg",
-          badge: "/favicon.svg",
           tag: "aqualog-overdue",
         });
       }, 2000);
@@ -426,6 +445,7 @@ export default function App() {
   const pageProps = { tanks, params, setParams, diary, setDiary, lsLog, setLsLog, tasks, setTasks, activeTank, setActiveTank, showToast, setTanks, tankName, loadAll };
 
   return (
+    <ErrorBoundary>
     <div style={{minHeight:"100vh",width:"100%",background:"#080d1a",color:"#e2e8f0",fontFamily:"'DM Sans','Segoe UI',sans-serif",overflowX:"hidden"}}>
       <style>{GLOBAL_CSS}</style>
 
@@ -490,6 +510,7 @@ export default function App() {
         </>
       </main>
     </div>
+    </ErrorBoundary>
   );
 }
 
@@ -1537,11 +1558,11 @@ function Scheduler({tanks,tasks,setTasks,showToast,tankName}) {
   ];
 
   const [notifStatus, setNotifStatus] = useState(
-    "Notification" in window ? Notification.permission : "unsupported"
+    typeof Notification !== "undefined" ? Notification.permission : "unsupported"
   );
 
   async function requestNotifications() {
-    if (!("Notification" in window)) { showToast("Notifications not supported on this browser","error"); return; }
+    if (typeof Notification === "undefined") { showToast("Notifications not supported in Safari browser — use the Home Screen app instead","error"); return; }
     const perm = await Notification.requestPermission();
     setNotifStatus(perm);
     if (perm === "granted") {
