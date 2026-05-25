@@ -236,7 +236,20 @@ Instructions:
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function fmt(d) {
   if (!d) return "";
+  return new Date(d+"T12:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"});
+}
+function fmtShort(d) {
+  if (!d) return "";
   return new Date(d+"T12:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric"});
+}
+
+// ─── Alkalinity conversion: freshwater measures in ppm, display as dKH ────────
+// ppm × 0.056 = dKH
+function alkDisplay(val, isSaltwater) {
+  if (val == null) return null;
+  if (isSaltwater) return { val: Number(val), unit: "dKH" };
+  const dkh = Math.round(Number(val) * 0.056 * 100) / 100;
+  return { val: dkh, unit: "dKH", raw: Number(val), rawUnit: "ppm" };
 }
 function nowTs() {
   return new Date().toLocaleString("en-US",{month:"short",day:"numeric",year:"numeric",hour:"2-digit",minute:"2-digit"});
@@ -302,13 +315,18 @@ const GLOBAL_CSS = `
   .grid-6 { display: grid; grid-template-columns: repeat(6,1fr); gap: 10px; }
   .grid-4 { display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; }
   .grid-2-1 { display: grid; grid-template-columns: 260px 1fr; gap: 16px; }
+  .sched-grid { display: grid; grid-template-columns: 1fr 380px; gap: 18px; align-items: start; }
 
+  @media (max-width: 900px) {
+    .sched-grid { grid-template-columns: 1fr !important; }
+  }
   @media (max-width: 768px) {
     .grid-3 { grid-template-columns: 1fr !important; }
     .grid-2 { grid-template-columns: 1fr !important; }
     .grid-6 { grid-template-columns: repeat(2,1fr) !important; gap: 8px !important; }
     .grid-4 { grid-template-columns: repeat(2,1fr) !important; }
     .grid-2-1 { grid-template-columns: 1fr !important; }
+    .sched-grid { grid-template-columns: 1fr !important; }
     .hide-mobile { display: none !important; }
     .nav-desktop { display: none !important; }
     .nav-mobile { display: flex !important; }
@@ -339,6 +357,42 @@ export default function App() {
     setToast(msg); setToastType(type);
     setTimeout(() => setToast(null), 3200);
   }
+
+  // ── Request notification permission and schedule daily reminders ──
+  useEffect(() => {
+    if ("Notification" in window && Notification.permission === "default") {
+      Notification.requestPermission();
+    }
+  }, []);
+
+  // ── Fire notifications for due/overdue tasks once per session ──
+  useEffect(() => {
+    if (!tasks.length) return;
+    if (Notification.permission !== "granted") return;
+    const sessionKey = "aqualog_notified_" + TODAY_STR;
+    if (sessionStorage.getItem(sessionKey)) return;
+    sessionStorage.setItem(sessionKey, "1");
+    const due   = tasks.filter(t => t.active && t.next_due === TODAY_STR);
+    const overdue = tasks.filter(t => t.active && t.next_due && t.next_due < TODAY_STR);
+    if (due.length > 0) {
+      new Notification("🐠 AquaLog — Tasks Due Today", {
+        body: due.map(t => `• ${t.title} (${t.tank})`).join("\n"),
+        icon: "/favicon.svg",
+        badge: "/favicon.svg",
+        tag: "aqualog-due",
+      });
+    }
+    if (overdue.length > 0) {
+      setTimeout(() => {
+        new Notification("⚠️ AquaLog — Overdue Tasks", {
+          body: overdue.map(t => `• ${t.title} (${t.tank}) — ${Math.abs(Math.ceil((new Date(t.next_due+"T12:00:00")-new Date())/(1000*60*60*24)))}d overdue`).join("\n"),
+          icon: "/favicon.svg",
+          badge: "/favicon.svg",
+          tag: "aqualog-overdue",
+        });
+      }, 2000);
+    }
+  }, [tasks]);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -427,7 +481,7 @@ export default function App() {
       )}
 
       {/* Main content */}
-      <main style={{maxWidth:1320,margin:"0 auto",padding:"16px",width:"100%"}}>
+      <main style={{maxWidth:"100%",margin:"0 auto",padding:"16px 20px",width:"100%",boxSizing:"border-box"}}>
         {loading ? <Spinner/> : (
           <>
             {page==="Dashboard"    && <Dashboard    {...pageProps}/>}
@@ -540,23 +594,33 @@ function Dashboard({tanks,params,diary,lsLog,tasks,activeTank,setActiveTank,tank
 
         <div style={S.card}>
           <div style={{fontSize:11,color:"#64748b",fontWeight:600,textTransform:"uppercase",letterSpacing:".08em",marginBottom:8}}>
-            Latest Readings {latest&&<span style={{color:"#475569",fontWeight:400}}>· {fmt(latest.date)}</span>}
+            Latest Readings <span style={{color:"#475569",fontWeight:400,textTransform:"none"}}>(most recent per parameter)</span>
           </div>
-          {latest?(
+          {allTP.length>0?(
             <div className="grid-2">
-              {(isSW?SW_PARAMS:FW_PARAMS).filter(p=>latest[p]!=null).map(p=>{
-                const v=latest[p],safe=PARAM_SAFE[p],ok=v>=safe.min&&v<=safe.max;
+              {(isSW?SW_PARAMS:FW_PARAMS).map(p=>{
+                // find the latest reading that has this parameter
+                const rec=allTP.find(r=>r[p]!=null);
+                if(!rec) return null;
+                const raw=rec[p];
+                const alk=p==="alkalinity"?alkDisplay(raw,isSW):null;
+                const displayVal=alk?alk.val:Number(raw);
+                const safe=PARAM_SAFE[p],ok=displayVal>=safe.min&&displayVal<=safe.max;
                 return(
                   <div key={p} style={{background:"#07111f",borderRadius:8,padding:"8px 10px",border:`1px solid ${ok?"transparent":"#f87171"}`}}>
-                    <div style={{fontSize:10,color:"#475569",marginBottom:2}}>{PARAM_LABELS[p]}</div>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:2}}>
+                      <div style={{fontSize:10,color:"#475569"}}>{PARAM_LABELS[p]}</div>
+                      <div style={{fontSize:9,color:"#334155"}}>{fmtShort(rec.date)}</div>
+                    </div>
                     <div style={{display:"flex",alignItems:"center",gap:4}}>
-                      <span style={{fontSize:16,fontWeight:700,color:ok?"#4ade80":"#f87171",fontFamily:"'DM Mono',monospace"}}>{v}</span>
+                      <span style={{fontSize:16,fontWeight:700,color:ok?"#4ade80":"#f87171",fontFamily:"'DM Mono',monospace"}}>{displayVal}</span>
+                      {alk&&alk.raw&&<span style={{fontSize:9,color:"#334155"}}>({alk.raw} ppm)</span>}
                       <span style={{fontSize:11}}>{ok?"✓":"⚠️"}</span>
                     </div>
                     <div style={{fontSize:9,color:"#334155",marginTop:1}}>Safe: {safe.min}–{safe.max}</div>
                   </div>
                 );
-              })}
+              }).filter(Boolean)}
             </div>
           ):<div style={{color:"#475569",fontSize:13}}>No readings yet.</div>}
         </div>
@@ -630,17 +694,26 @@ function Dashboard({tanks,params,diary,lsLog,tasks,activeTank,setActiveTank,tank
 
 // ─── Log Parameters ───────────────────────────────────────────────────────────
 function LogParams({tanks,params,setParams,showToast,tankName}) {
-  const [tank,  setTank]  = useState("");
-  const [date,  setDate]  = useState(TODAY_STR);
-  const [vals,  setVals]  = useState({});
-  const [notes, setNotes] = useState("");
-  const [saving,setSaving]= useState(false);
+  const [tank,  setTank]    = useState("");
+  const [date,  setDate]    = useState(TODAY_STR);
+  const [vals,  setVals]    = useState({});
+  const [notes, setNotes]   = useState("");
+  const [saving,setSaving]  = useState(false);
+  const [page,  setPage]    = useState(1);
+  const [editRow, setEditRow] = useState(null);  // id of row being edited
+  const [editVals,setEditVals]= useState({});
+  const [editDate,setEditDate]= useState("");
+  const [delConfirm,setDelConfirm]=useState(null);
+  const PER_PAGE = 10;
 
   useEffect(()=>{ if(tanks.length&&!tank) setTank(tankName(tanks[0])); },[tanks]);
 
   const isSW  = tanks.find(t=>tankName(t)===tank)?.type==="saltwater";
   const pKeys = isSW ? SW_PARAMS : FW_PARAMS;
-  const last  = params.filter(p=>p.tank===tank).sort((a,b)=>b.date.localeCompare(a.date))[0];
+  const tankParams = params.filter(p=>p.tank===tank).sort((a,b)=>b.date.localeCompare(a.date));
+  const last  = tankParams[0];
+  const totalPages = Math.ceil(tankParams.length/PER_PAGE);
+  const pageRows   = tankParams.slice((page-1)*PER_PAGE, page*PER_PAGE);
 
   async function submit() {
     setSaving(true);
@@ -648,41 +721,74 @@ function LogParams({tanks,params,setParams,showToast,tankName}) {
     pKeys.forEach(p=>{if(vals[p]!==""&&vals[p]!==undefined)entry[p]=parseFloat(vals[p]);});
     const {data,error}=await supabase.from("parameters").insert([entry]).select().single();
     if(error){showToast("Save failed: "+error.message,"error");}
-    else{setParams(prev=>[...prev,data]);setVals({});setNotes("");showToast("Parameters saved!");}
+    else{setParams(prev=>[...prev,data]);setVals({});setNotes("");setPage(1);showToast("Parameters saved!");}
     setSaving(false);
   }
 
+  function startEdit(row) {
+    setEditRow(row.id);
+    setEditDate(row.date);
+    const v={};
+    pKeys.forEach(p=>{ v[p]=row[p]!=null?row[p]:""; });
+    setEditVals(v);
+  }
+
+  async function saveEdit(id) {
+    setSaving(true);
+    const updates={date:editDate};
+    pKeys.forEach(p=>{ updates[p]=editVals[p]!==""&&editVals[p]!==undefined?parseFloat(editVals[p]):null; });
+    const {data,error}=await supabase.from("parameters").update(updates).eq("id",id).select().single();
+    if(error){showToast("Update failed: "+error.message,"error");}
+    else{setParams(prev=>prev.map(r=>r.id===id?data:r));setEditRow(null);showToast("Reading updated!");}
+    setSaving(false);
+  }
+
+  async function deleteRow(id) {
+    const {error}=await supabase.from("parameters").delete().eq("id",id);
+    if(error){showToast("Delete failed: "+error.message,"error");}
+    else{setParams(prev=>prev.filter(r=>r.id!==id));setDelConfirm(null);showToast("Reading deleted.");}
+  }
+
+  function displayAlk(row) {
+    if(row.alkalinity==null) return null;
+    const a=alkDisplay(row.alkalinity,isSW);
+    return a;
+  }
+
   return (
-    <div style={{maxWidth:720,width:"100%"}}>
+    <div style={{width:"100%"}}>
       <div style={{marginBottom:20}}><div style={{fontSize:20,fontWeight:700,color:"#e2e8f0",marginBottom:3}}>Log Parameters</div><div style={{fontSize:13,color:"#475569"}}>Record water chemistry readings</div></div>
-      <div style={{...S.card,borderRadius:16,padding:20}}>
+
+      {/* ── Entry form ── */}
+      <div style={{...S.card,borderRadius:16,padding:20,marginBottom:20}}>
         <div className="grid-2" style={{marginBottom:16}}>
-          <Field label="Tank"><select value={tank} onChange={e=>{setTank(e.target.value);setVals({});}} style={S.sel}>{tanks.map(t=><option key={tankName(t)} value={tankName(t)}>{t.type==="saltwater"?"🪸":"🐡"} {tankName(t)}</option>)}</select></Field>
+          <Field label="Tank"><select value={tank} onChange={e=>{setTank(e.target.value);setVals({});setPage(1);}} style={S.sel}>{tanks.map(t=><option key={tankName(t)} value={tankName(t)}>{t.type==="saltwater"?"🪸":"🐡"} {tankName(t)}</option>)}</select></Field>
           <Field label="Date"><input type="date" value={date} onChange={e=>setDate(e.target.value)} style={S.inp}/></Field>
         </div>
         <div style={{fontSize:11,color:"#334155",marginBottom:16,fontFamily:"'DM Mono',monospace"}}>📍 {nowTs()}</div>
-        {last&&<div style={{background:"#07111f",borderRadius:8,padding:"8px 12px",marginBottom:16,fontSize:11,color:"#64748b"}}><span style={{fontWeight:600,color:"#475569"}}>Last:</span> {fmt(last.date)} · {pKeys.filter(p=>last[p]!=null).map(p=>`${p}: ${last[p]}`).join(" · ")}</div>}
+        {last&&<div style={{background:"#07111f",borderRadius:8,padding:"8px 12px",marginBottom:16,fontSize:11,color:"#64748b"}}><span style={{fontWeight:600,color:"#475569"}}>Last reading:</span> {fmt(last.date)} · {pKeys.filter(p=>last[p]!=null).map(p=>`${p}: ${last[p]}`).join(" · ")}</div>}
+        {!isSW&&<div style={{background:"rgba(56,189,248,0.06)",border:"1px solid #1e3a5f",borderRadius:8,padding:"7px 12px",marginBottom:14,fontSize:11,color:"#64748b"}}>💡 Enter Alkalinity in <strong style={{color:"#7dd3fc"}}>ppm</strong> — it will be displayed as dKH (×0.056)</div>}
         <div className="grid-2" style={{marginBottom:16}}>
           {pKeys.map(p=>{
             const v=vals[p],n=parseFloat(v),safe=PARAM_SAFE[p];
             const ok=v!==""&&v!==undefined&&!isNaN(n)?(n>=safe.min&&n<=safe.max):null;
             const anomaly=v&&!isNaN(n)?detectAnomalies(params.filter(r=>r.tank===tank),p,v):null;
+            const alkHint = p==="alkalinity"&&!isSW&&v?` → ${Math.round(parseFloat(v)*0.056*100)/100} dKH`:"";
             return (
-              <Field key={p} label={PARAM_LABELS[p]}>
+              <Field key={p} label={`${PARAM_LABELS[p]}${p==="alkalinity"&&!isSW?" (ppm)":""}`}>
                 <div style={{position:"relative"}}>
-                  <input type="number" step="0.01" placeholder={`Safe: ${safe.min}–${safe.max}`} value={v||""} onChange={e=>setVals(prev=>({...prev,[p]:e.target.value}))}
+                  <input type="number" step="0.01"
+                    placeholder={p==="alkalinity"&&!isSW?`ppm (e.g. 180 = ${(180*0.056).toFixed(1)} dKH)`:`Safe: ${safe.min}–${safe.max}`}
+                    value={v||""} onChange={e=>setVals(prev=>({...prev,[p]:e.target.value}))}
                     style={{...S.inp,borderColor:anomaly?.level==="critical"?"#f97316":ok===false?"#f87171":ok===true?"#4ade80":"#1e3a5f",paddingRight:28}}/>
                   {ok!==null&&!anomaly&&<span style={{position:"absolute",right:9,top:"50%",transform:"translateY(-50%)",fontSize:13}}>{ok?"✓":"⚠"}</span>}
                   {anomaly&&<span style={{position:"absolute",right:9,top:"50%",transform:"translateY(-50%)",fontSize:13}}>🤔</span>}
                 </div>
+                {alkHint&&<div style={{fontSize:10,color:"#38bdf8",marginTop:3}}>{alkHint}</div>}
                 {anomaly&&(
                   <div style={{marginTop:5,background:anomaly.level==="critical"?"rgba(249,115,22,0.12)":"rgba(251,191,36,0.1)",border:`1px solid ${anomaly.level==="critical"?"#f97316":"#fbbf24"}`,borderRadius:7,padding:"7px 10px",fontSize:11}}>
-                    <div style={{fontWeight:700,color:anomaly.level==="critical"?"#fb923c":"#fbbf24",marginBottom:2}}>
-                      {anomaly.level==="critical"?"⚠️ Possible Typo Detected":"🤔 Unusual Value"}
-                    </div>
-                    <div style={{color:"#94a3b8"}}>
-                      This is <strong style={{color:"#e2e8f0"}}>{anomaly.pct}% {parseFloat(v)>anomaly.avg?"above":"below"}</strong> your average of <strong style={{color:"#e2e8f0"}}>{anomaly.avg}</strong> (z-score: {anomaly.z}). Did you mean <strong style={{color:"#7dd3fc"}}>{Math.round(anomaly.avg*10)/10}</strong> instead?
-                    </div>
+                    <div style={{fontWeight:700,color:anomaly.level==="critical"?"#fb923c":"#fbbf24",marginBottom:2}}>{anomaly.level==="critical"?"⚠️ Possible Typo":"🤔 Unusual Value"}</div>
+                    <div style={{color:"#94a3b8"}}>This is <strong style={{color:"#e2e8f0"}}>{anomaly.pct}% {parseFloat(v)>anomaly.avg?"above":"below"}</strong> your avg of <strong style={{color:"#e2e8f0"}}>{anomaly.avg}</strong> (z={anomaly.z}). Did you mean <strong style={{color:"#7dd3fc"}}>{Math.round(anomaly.avg*10)/10}</strong>?</div>
                   </div>
                 )}
               </Field>
@@ -692,6 +798,112 @@ function LogParams({tanks,params,setParams,showToast,tankName}) {
         <Field label="Notes (optional)"><textarea value={notes} onChange={e=>setNotes(e.target.value)} rows={2} placeholder="Observations..." style={{...S.inp,resize:"vertical",marginBottom:16}}/></Field>
         <button onClick={submit} disabled={saving} style={{...S.btn,opacity:saving?0.6:1,width:"100%"}}>{saving?"💾 Saving…":"💧 Save Parameters"}</button>
       </div>
+
+      {/* ── History table ── */}
+      {tankParams.length>0&&(
+        <div style={S.card}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:8}}>
+            <div style={{fontSize:13,fontWeight:700,color:"#cbd5e1"}}>Previous Readings — {tank}</div>
+            <div style={{fontSize:12,color:"#475569"}}>{tankParams.length} total · page {page} of {totalPages}</div>
+          </div>
+
+          <div style={{overflowX:"auto"}}>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:600}}>
+              <thead>
+                <tr style={{background:"#07111f",fontSize:10,color:"#64748b",textTransform:"uppercase",letterSpacing:".06em"}}>
+                  <th style={{padding:"8px 12px",textAlign:"left",fontWeight:700,whiteSpace:"nowrap"}}>Date</th>
+                  {pKeys.map(p=><th key={p} style={{padding:"8px 10px",textAlign:"right",fontWeight:700,whiteSpace:"nowrap"}}>{p==="alkalinity"?"Alk (dKH)":p.toUpperCase()}</th>)}
+                  <th style={{padding:"8px 12px",textAlign:"left",fontWeight:700}}>Notes</th>
+                  <th style={{padding:"8px 12px",textAlign:"center",fontWeight:700}}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pageRows.map((row,i)=>{
+                  const isEdit=editRow===row.id;
+                  return(
+                    <tr key={row.id||i} style={{borderBottom:"1px solid #0f2035",background:i%2===0?"transparent":"rgba(7,17,31,0.4)"}}>
+                      {isEdit?(
+                        <>
+                          <td style={{padding:"8px 12px"}}>
+                            <input type="date" value={editDate} onChange={e=>setEditDate(e.target.value)} style={{...S.inp,padding:"4px 8px",fontSize:12,width:140}}/>
+                          </td>
+                          {pKeys.map(p=>(
+                            <td key={p} style={{padding:"6px 8px"}}>
+                              <input type="number" step="0.01" value={editVals[p]||""} onChange={e=>setEditVals(prev=>({...prev,[p]:e.target.value}))}
+                                style={{...S.inp,padding:"4px 8px",fontSize:12,width:80,textAlign:"right"}}/>
+                            </td>
+                          ))}
+                          <td style={{padding:"6px 8px"}}><span style={{fontSize:10,color:"#475569"}}>—</span></td>
+                          <td style={{padding:"6px 12px"}}>
+                            <div style={{display:"flex",gap:4,justifyContent:"center"}}>
+                              <button onClick={()=>saveEdit(row.id)} disabled={saving} style={{fontSize:11,background:"linear-gradient(135deg,#14532d,#22c55e)",border:"none",color:"#fff",borderRadius:6,padding:"4px 10px",cursor:"pointer",fontWeight:700}}>{saving?"…":"Save"}</button>
+                              <button onClick={()=>setEditRow(null)} style={{fontSize:11,background:"#1e3a5f",border:"none",color:"#94a3b8",borderRadius:6,padding:"4px 8px",cursor:"pointer"}}>✕</button>
+                            </div>
+                          </td>
+                        </>
+                      ):(
+                        <>
+                          <td style={{padding:"8px 12px",color:"#94a3b8",whiteSpace:"nowrap"}}>{fmt(row.date)}</td>
+                          {pKeys.map(p=>{
+                            let display=row[p]!=null?Number(row[p]):null;
+                            let extra=null;
+                            if(p==="alkalinity"&&row[p]!=null){const a=alkDisplay(row[p],isSW);display=a.val;extra=!isSW?<div style={{fontSize:9,color:"#334155"}}>{a.raw}ppm</div>:null;}
+                            const safe=PARAM_SAFE[p];
+                            const ok=display!=null?(display>=safe.min&&display<=safe.max):null;
+                            return(
+                              <td key={p} style={{padding:"8px 10px",textAlign:"right"}}>
+                                {display!=null?(
+                                  <div>
+                                    <span style={{fontWeight:600,color:ok===false?"#f87171":ok===true?"#4ade80":"#94a3b8",fontFamily:"'DM Mono',monospace"}}>{display}</span>
+                                    {extra}
+                                  </div>
+                                ):<span style={{color:"#1e3a5f"}}>—</span>}
+                              </td>
+                            );
+                          })}
+                          <td style={{padding:"8px 12px",color:"#475569",fontSize:11,maxWidth:150,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{row.notes||"—"}</td>
+                          <td style={{padding:"8px 12px"}}>
+                            <div style={{display:"flex",gap:5,justifyContent:"center"}}>
+                              <button onClick={()=>startEdit(row)} style={{fontSize:11,background:"rgba(56,189,248,0.1)",border:"1px solid #38bdf8",color:"#38bdf8",borderRadius:6,padding:"3px 8px",cursor:"pointer",fontWeight:600}}>✏️</button>
+                              {delConfirm===row.id?(
+                                <span style={{display:"flex",gap:3}}>
+                                  <button onClick={()=>deleteRow(row.id)} style={{fontSize:11,background:"#7f1d1d",border:"none",color:"#fca5a5",borderRadius:5,padding:"3px 7px",cursor:"pointer",fontWeight:700}}>✓</button>
+                                  <button onClick={()=>setDelConfirm(null)} style={{fontSize:11,background:"#1e3a5f",border:"none",color:"#94a3b8",borderRadius:5,padding:"3px 7px",cursor:"pointer"}}>✕</button>
+                                </span>
+                              ):(
+                                <button onClick={()=>setDelConfirm(row.id)} style={{fontSize:11,background:"rgba(248,113,113,0.1)",border:"1px solid #f87171",color:"#f87171",borderRadius:6,padding:"3px 8px",cursor:"pointer"}}>🗑</button>
+                              )}
+                            </div>
+                          </td>
+                        </>
+                      )}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Pagination */}
+          {totalPages>1&&(
+            <div style={{display:"flex",justifyContent:"center",alignItems:"center",gap:8,marginTop:14}}>
+              <button onClick={()=>setPage(1)} disabled={page===1} style={{fontSize:12,background:"#07111f",border:"1px solid #1e3a5f",color:page===1?"#334155":"#64748b",borderRadius:7,padding:"5px 10px",cursor:page===1?"default":"pointer"}}>«</button>
+              <button onClick={()=>setPage(p=>Math.max(1,p-1))} disabled={page===1} style={{fontSize:12,background:"#07111f",border:"1px solid #1e3a5f",color:page===1?"#334155":"#64748b",borderRadius:7,padding:"5px 10px",cursor:page===1?"default":"pointer"}}>‹</button>
+              {Array.from({length:Math.min(5,totalPages)},(_,i)=>{
+                let p=page-2+i;
+                if(p<1) p=i+1;
+                if(p>totalPages) p=totalPages-4+i;
+                p=Math.max(1,Math.min(totalPages,p));
+                return(
+                  <button key={p} onClick={()=>setPage(p)} style={{fontSize:12,background:page===p?"rgba(56,189,248,0.2)":"#07111f",border:`1px solid ${page===p?"#38bdf8":"#1e3a5f"}`,color:page===p?"#7dd3fc":"#64748b",borderRadius:7,padding:"5px 10px",cursor:"pointer",fontWeight:page===p?700:400}}>{p}</button>
+                );
+              })}
+              <button onClick={()=>setPage(p=>Math.min(totalPages,p+1))} disabled={page===totalPages} style={{fontSize:12,background:"#07111f",border:"1px solid #1e3a5f",color:page===totalPages?"#334155":"#64748b",borderRadius:7,padding:"5px 10px",cursor:page===totalPages?"default":"pointer"}}>›</button>
+              <button onClick={()=>setPage(totalPages)} disabled={page===totalPages} style={{fontSize:12,background:"#07111f",border:"1px solid #1e3a5f",color:page===totalPages?"#334155":"#64748b",borderRadius:7,padding:"5px 10px",cursor:page===totalPages?"default":"pointer"}}>»</button>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -1284,33 +1496,35 @@ function Scheduler({tanks,tasks,setTasks,showToast,tankName}) {
     const isToday=days===0;
     const tc=getTankColor(t.tank,tanks);
     return(
-      <div style={{...S.card,padding:"12px 16px",borderLeft:`3px solid ${isOverdue?"#f87171":isToday?"#fbbf24":tc}`,display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,opacity:t.active?1:0.45,flexWrap:"wrap"}}>
-        <div style={{flex:1,minWidth:0}}>
-          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:3}}>
-            <span style={{fontSize:13,fontWeight:700,color:"#e2e8f0"}}>{t.title}</span>
-            <span style={{fontSize:10,background:`${CAT_COLORS[t.category]||"#64748b"}22`,color:CAT_COLORS[t.category]||"#64748b",borderRadius:4,padding:"1px 7px",fontWeight:600}}>{t.category}</span>
+      <div style={{...S.card,padding:"12px 14px",borderLeft:`3px solid ${isOverdue?"#f87171":isToday?"#fbbf24":tc}`,opacity:t.active?1:0.45}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10,flexWrap:"wrap"}}>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:3,flexWrap:"wrap"}}>
+              <span style={{fontSize:13,fontWeight:700,color:"#e2e8f0"}}>{t.title}</span>
+              <span style={{fontSize:10,background:`${CAT_COLORS[t.category]||"#64748b"}22`,color:CAT_COLORS[t.category]||"#64748b",borderRadius:4,padding:"1px 7px",fontWeight:600}}>{t.category}</span>
+            </div>
+            <div style={{display:"flex",gap:10,flexWrap:"wrap",fontSize:10,color:"#475569"}}>
+              {showTank&&<span style={{color:tc,fontWeight:600}}>{t.tank}</span>}
+              <span>🔁 Every {t.frequency_days}d</span>
+              {t.last_done&&<span>Last: {fmt(t.last_done)}</span>}
+              {t.next_due&&<span style={{color:isOverdue?"#f87171":isToday?"#fbbf24":"#64748b",fontWeight:isOverdue||isToday?700:400}}>
+                {isOverdue?`⚠️ ${Math.abs(days)}d overdue`:isToday?"📅 Due today":`Next: ${fmt(t.next_due)} (${days}d)`}
+              </span>}
+              {t.notes&&<span style={{color:"#334155"}}>· {t.notes}</span>}
+            </div>
           </div>
-          <div style={{display:"flex",gap:12,flexWrap:"wrap",fontSize:10,color:"#475569"}}>
-            {showTank&&<span style={{color:tc,fontWeight:600}}>{t.tank}</span>}
-            <span>🔁 Every {t.frequency_days}d</span>
-            {t.last_done&&<span>Last: {fmt(t.last_done)}</span>}
-            {t.next_due&&<span style={{color:isOverdue?"#f87171":isToday?"#fbbf24":"#64748b",fontWeight:isOverdue||isToday?700:400}}>
-              {isOverdue?`⚠️ ${Math.abs(days)}d overdue`:isToday?"📅 Due today":`Next: ${fmt(t.next_due)} (${days}d)`}
-            </span>}
-            {t.notes&&<span style={{color:"#334155"}}>· {t.notes}</span>}
+          <div style={{display:"flex",gap:5,flexShrink:0,flexWrap:"wrap"}}>
+            <button onClick={()=>markDone(t)} style={{fontSize:11,background:"rgba(74,222,128,0.15)",border:"1px solid #4ade80",color:"#4ade80",borderRadius:7,padding:"5px 10px",cursor:"pointer",fontWeight:700,whiteSpace:"nowrap"}}>✓ Done</button>
+            <button onClick={()=>toggleActive(t)} style={{fontSize:11,background:"#07111f",border:"1px solid #1e3a5f",color:"#64748b",borderRadius:7,padding:"5px 8px",cursor:"pointer"}}>{t.active?"Pause":"Resume"}</button>
+            {confirmId===t.id?(
+              <span style={{display:"flex",gap:4}}>
+                <button onClick={()=>deleteTask(t.id)} style={{fontSize:11,background:"#7f1d1d",border:"none",color:"#fca5a5",borderRadius:6,padding:"5px 8px",cursor:"pointer",fontWeight:700}}>Confirm</button>
+                <button onClick={()=>setConfirmId(null)} style={{fontSize:11,background:"#1e3a5f",border:"none",color:"#94a3b8",borderRadius:6,padding:"5px 8px",cursor:"pointer"}}>✕</button>
+              </span>
+            ):(
+              <button onClick={()=>setConfirmId(t.id)} style={{fontSize:11,background:"rgba(248,113,113,0.1)",border:"1px solid #f87171",color:"#f87171",borderRadius:7,padding:"5px 8px",cursor:"pointer"}}>🗑</button>
+            )}
           </div>
-        </div>
-        <div style={{display:"flex",gap:6,flexShrink:0}}>
-          <button onClick={()=>markDone(t)} style={{fontSize:11,background:"rgba(74,222,128,0.15)",border:"1px solid #4ade80",color:"#4ade80",borderRadius:7,padding:"5px 12px",cursor:"pointer",fontWeight:700,whiteSpace:"nowrap"}}>✓ Done</button>
-          <button onClick={()=>toggleActive(t)} style={{fontSize:11,background:"#07111f",border:"1px solid #1e3a5f",color:"#64748b",borderRadius:7,padding:"5px 10px",cursor:"pointer"}}>{t.active?"Pause":"Resume"}</button>
-          {confirmId===t.id?(
-            <span style={{display:"flex",gap:4}}>
-              <button onClick={()=>deleteTask(t.id)} style={{fontSize:11,background:"#7f1d1d",border:"none",color:"#fca5a5",borderRadius:6,padding:"5px 9px",cursor:"pointer",fontWeight:700}}>Confirm</button>
-              <button onClick={()=>setConfirmId(null)} style={{fontSize:11,background:"#1e3a5f",border:"none",color:"#94a3b8",borderRadius:6,padding:"5px 9px",cursor:"pointer"}}>✕</button>
-            </span>
-          ):(
-            <button onClick={()=>setConfirmId(t.id)} style={{fontSize:11,background:"rgba(248,113,113,0.1)",border:"1px solid #f87171",color:"#f87171",borderRadius:7,padding:"5px 9px",cursor:"pointer"}}>🗑</button>
-          )}
         </div>
       </div>
     );
@@ -1329,11 +1543,34 @@ function Scheduler({tanks,tasks,setTasks,showToast,tankName}) {
     {title:"Scrape Algae",             category:"Maintenance",frequency_days:7},
   ];
 
+  const [notifStatus, setNotifStatus] = useState(
+    "Notification" in window ? Notification.permission : "unsupported"
+  );
+
+  async function requestNotifications() {
+    if (!("Notification" in window)) { showToast("Notifications not supported on this browser","error"); return; }
+    const perm = await Notification.requestPermission();
+    setNotifStatus(perm);
+    if (perm === "granted") {
+      showToast("Notifications enabled! You'll be reminded on task due dates.");
+      new Notification("🐠 AquaLog Notifications", { body:"You'll be notified when tasks are due. Open the app each day to trigger reminders.", tag:"aqualog-test" });
+    } else {
+      showToast("Notifications blocked. Enable in iPhone Settings → Safari → Notifications","error");
+    }
+  }
+
   return(
     <div>
-      <div style={{marginBottom:20}}>
-        <div style={{fontSize:20,fontWeight:700,color:"#e2e8f0",marginBottom:3}}>Maintenance Scheduler</div>
-        <div style={{fontSize:13,color:"#475569"}}>Set recurring reminders for tank maintenance tasks</div>
+      <div style={{marginBottom:20,display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:12}}>
+        <div>
+          <div style={{fontSize:20,fontWeight:700,color:"#e2e8f0",marginBottom:3}}>Maintenance Scheduler</div>
+          <div style={{fontSize:13,color:"#475569"}}>Set recurring reminders for tank maintenance tasks</div>
+        </div>
+        {/* Notification toggle */}
+        <button onClick={notifStatus==="granted"?null:requestNotifications}
+          style={{background:notifStatus==="granted"?"rgba(74,222,128,0.1)":"rgba(56,189,248,0.1)",border:`1px solid ${notifStatus==="granted"?"#4ade80":"#38bdf8"}`,color:notifStatus==="granted"?"#4ade80":"#7dd3fc",borderRadius:10,padding:"8px 16px",cursor:notifStatus==="granted"?"default":"pointer",fontSize:12,fontWeight:600,whiteSpace:"nowrap"}}>
+          {notifStatus==="granted"?"🔔 Notifications On":notifStatus==="denied"?"🔕 Blocked in Settings":"🔔 Enable Notifications"}
+        </button>
       </div>
 
       {/* Summary pills */}
@@ -1350,7 +1587,7 @@ function Scheduler({tanks,tasks,setTasks,showToast,tankName}) {
         ))}
       </div>
 
-      <div style={{display:"grid",gridTemplateColumns:"1fr 380px",gap:18,alignItems:"start"}}>
+      <div className="sched-grid">
         {/* Task list */}
         <div>
           <div style={{display:"flex",gap:8,marginBottom:14,alignItems:"center",flexWrap:"wrap"}}>
