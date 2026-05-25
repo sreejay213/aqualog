@@ -308,6 +308,7 @@ const GLOBAL_CSS = `
   ::-webkit-scrollbar-track { background: #0d1526; }
   ::-webkit-scrollbar-thumb { background: #1e3a5f; border-radius: 3px; }
   @keyframes spin { to { transform: rotate(360deg); } }
+  nav::-webkit-scrollbar { display: none; }
 
   /* ── Responsive grid helpers ── */
   .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
@@ -348,7 +349,7 @@ export default function App() {
   const [lsLog, setLsLog]       = useState([]);
   const [tasks, setTasks]       = useState([]);
   const [loading, setLoading]   = useState(true);
-  const [activeTank, setActiveTank] = useState("");
+  const [activeTank, setActiveTank] = useState(FALLBACK_TANKS[FALLBACK_TANKS.length-1].id);
   const [toast, setToast]       = useState(null);
   const [toastType, setToastType] = useState("success");
   const [menuOpen, setMenuOpen] = useState(false);
@@ -406,7 +407,11 @@ export default function App() {
       ]);
       const tankData = (tRes.data && tRes.data.length > 0) ? sortTanks(tRes.data) : FALLBACK_TANKS;
       setTanks(tankData);
-      if (!activeTank && tankData.length > 0) setActiveTank(tankData[tankData.length-1].name || tankData[tankData.length-1].id);
+      setActiveTank(prev => {
+        // Keep current selection if it exists in new data, otherwise pick last tank
+        const exists = tankData.find(t => (t.name||t.id) === prev);
+        return exists ? prev : (tankData[tankData.length-1].name || tankData[tankData.length-1].id);
+      });
       setParams(pRes.data || []);
       setDiary(dRes.data || []);
       setLsLog(lRes.data || []);
@@ -418,13 +423,6 @@ export default function App() {
   }, []);
 
   useEffect(() => { loadAll(); }, [loadAll]);
-
-  // Set default active tank once tanks load
-  useEffect(() => {
-    if (!activeTank && tanks.length > 0) {
-      setActiveTank(tanks[tanks.length-1].name || tanks[tanks.length-1].id);
-    }
-  }, [tanks]);
 
   function tankName(t) { return t.name || t.id; }
 
@@ -441,9 +439,9 @@ export default function App() {
         <span style={{color:"#334155"}} className="hide-mobile">|</span>
 
         {/* Desktop nav */}
-        <nav className="nav-desktop" style={{display:"flex",gap:2,flexWrap:"nowrap",overflow:"hidden"}}>
+        <nav className="nav-desktop" style={{display:"flex",gap:2,flexWrap:"nowrap",overflowX:"auto",overflowY:"hidden",scrollbarWidth:"none",msOverflowStyle:"none",flex:1}}>
           {NAV.map(n => (
-            <button key={n.id} onClick={() => setPage(n.id)} style={{background:page===n.id?"rgba(56,189,248,0.15)":"transparent",color:page===n.id?"#7dd3fc":"#64748b",border:page===n.id?"1px solid rgba(56,189,248,0.3)":"1px solid transparent",borderRadius:8,padding:"4px 10px",cursor:"pointer",fontSize:11,fontWeight:600,whiteSpace:"nowrap"}}>
+            <button key={n.id} onClick={() => setPage(n.id)} style={{background:page===n.id?"rgba(56,189,248,0.15)":"transparent",color:page===n.id?"#7dd3fc":"#64748b",border:page===n.id?"1px solid rgba(56,189,248,0.3)":"1px solid transparent",borderRadius:8,padding:"4px 8px",cursor:"pointer",fontSize:11,fontWeight:600,whiteSpace:"nowrap",flexShrink:0}}>
               {n.icon} {n.id}
             </button>
           ))}
@@ -455,8 +453,8 @@ export default function App() {
           {menuOpen ? "✕" : "☰"}
         </button>
 
-        <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:8}}>
-          <button onClick={loadAll} style={{background:"none",border:"1px solid #1e3a5f",borderRadius:8,color:"#475569",cursor:"pointer",padding:"4px 10px",fontSize:12,whiteSpace:"nowrap"}}>↻</button>
+        <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0,marginLeft:8}}>
+          <button onClick={loadAll} title="Refresh" style={{background:"none",border:"1px solid #1e3a5f",borderRadius:8,color:"#475569",cursor:"pointer",padding:"4px 10px",fontSize:12,whiteSpace:"nowrap",flexShrink:0}}>↻</button>
           <span className="header-ts" style={{fontSize:10,color:"#334155",whiteSpace:"nowrap"}}>{nowTs()}</span>
         </div>
       </header>
