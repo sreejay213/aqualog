@@ -195,11 +195,17 @@ function rateOfChange(readings,param) {
 }
 
 // ─── Anomaly detection ────────────────────────────────────────────────────────
-function detectAnomalies(vals, param, newVal) {
+function detectAnomalies(tankReadings, param, newVal, isSW) {
   if(!newVal || isNaN(parseFloat(newVal))) return null;
-  const v = parseFloat(newVal);
-  const history = vals.filter(r=>r[param]!=null).map(r=>Number(r[param]));
-  if(history.length < 3) return null; // not enough history
+  let v = parseFloat(newVal);
+  // Convert FW alkalinity input (ppm) to dKH for comparison
+  if(param === "alkalinity" && !isSW) v = Math.round(v * 0.056 * 100) / 100;
+  const history = tankReadings.filter(r=>r[param]!=null).map(r=>{
+    let val = Number(r[param]);
+    if(param === "alkalinity" && !isSW) val = Math.round(val * 0.056 * 100) / 100;
+    return val;
+  });
+  if(history.length < 3) return null;
   const z = zScore(v, history);
   const m = mean(history);
   const pct = m !== 0 ? Math.abs((v-m)/m)*100 : 0;
@@ -212,21 +218,30 @@ function detectAnomalies(vals, param, newVal) {
 async function fetchAISummary(tank, recentReadings, diaryEntries, lsLog) {
   const isSW = tank.type === "saltwater";
   const pKeys = isSW ? SW_PARAMS : FW_PARAMS;
+
+  // Convert readings: for FW tanks, alkalinity ppm → dKH before any calculations
+  const convertedReadings = recentReadings.map(r => {
+    if (isSW || r.alkalinity == null) return r;
+    return { ...r, alkalinity: Math.round(Number(r.alkalinity) * 0.056 * 100) / 100 };
+  });
+
   const paramSummary = pKeys.map(p=>{
-    const vals=recentReadings.filter(r=>r[p]!=null).map(r=>Number(r[p]));
+    const vals=convertedReadings.filter(r=>r[p]!=null).map(r=>Number(r[p]));
     if(!vals.length) return null;
-    const forecast=trendForecast(recentReadings,p,7);
+    const forecast=trendForecast(convertedReadings,p,7);
     const stability=stabilityScore(vals);
-    const roc=rateOfChange(recentReadings,p);
+    const roc=rateOfChange(convertedReadings,p);
     const safe=PARAM_SAFE[p];
     const latest=vals[vals.length-1];
     return {
       param:p, label:PARAM_LABELS[p],
-      latest, avg:Math.round(mean(vals)*100)/100,
+      latest:Math.round(latest*100)/100,
+      avg:Math.round(mean(vals)*100)/100,
       stability, forecast,
       roc:roc?Math.round(roc*10)/10:null,
       outOfRange:latest<safe.min||latest>safe.max,
-      safe:`${safe.min}–${safe.max}`
+      safe:`${safe.min}–${safe.max}`,
+      unit: p==="alkalinity" ? "dKH" : ""
     };
   }).filter(Boolean);
 
@@ -239,7 +254,7 @@ Tank: ${tank.name} (${tank.type}, ${tank.volume_gal||"?"}G)
 Live inhabitants: ${livestock.join(", ")||"unknown"}
 
 Recent parameter data:
-${paramSummary.map(p=>`- ${p.label}: latest=${p.latest}, avg=${p.avg}, stable=${p.stability}%${p.roc?`, trend=${p.roc>0?"+":""}${p.roc}%`:""}${p.outOfRange?" ⚠️ OUT OF RANGE":""}${p.forecast?`, forecast=${p.forecast.value} by ${p.forecast.dayName}`:""} (safe: ${p.safe})`).join("\n")}
+${paramSummary.map(p=>`- ${p.label}${p.unit?` (${p.unit})`:""}: latest=${p.latest}, avg=${p.avg}, stable=${p.stability}%${p.roc?`, trend=${p.roc>0?"+":""}${p.roc}%`:""}${p.outOfRange?" ⚠️ OUT OF RANGE":""}${p.forecast?`, forecast=${p.forecast.value} by ${p.forecast.dayName}`:""} (safe: ${p.safe})`).join("\n")}
 
 Recent maintenance:
 ${recentMaint||"None logged"}
@@ -833,7 +848,7 @@ function LogParams({tanks,params,setParams,showToast,tankName}) {
           {pKeys.map(p=>{
             const v=vals[p],n=parseFloat(v),safe=PARAM_SAFE[p];
             const ok=v!==""&&v!==undefined&&!isNaN(n)?(n>=safe.min&&n<=safe.max):null;
-            const anomaly=v&&!isNaN(n)?detectAnomalies(params.filter(r=>r.tank===tank),p,v):null;
+            const anomaly=v&&!isNaN(n)?detectAnomalies(params.filter(r=>r.tank===tank),p,v,isSW):null;
             const alkHint = p==="alkalinity"&&!isSW&&v?` → ${Math.round(parseFloat(v)*0.056*100)/100} dKH`:"";
             return (
               <Field key={p} label={`${PARAM_LABELS[p]}${p==="alkalinity"&&!isSW?" (ppm)":""}`}>
@@ -1767,23 +1782,28 @@ function Insights({tanks,params,diary,lsLog,activeTank,setActiveTank,tankName}) 
     setAiLoading(false);
   }
 
-  // ── Per-parameter analytics ──
+  // ── Per-parameter analytics — convert FW alkalinity ppm→dKH first ──
+  const convertedReadings = readings.map(r => {
+    if (isSW || r.alkalinity == null) return r;
+    return { ...r, alkalinity: Math.round(Number(r.alkalinity) * 0.056 * 100) / 100 };
+  });
+
   const analytics = pKeys.map(p=>{
-    const vals=readings.filter(r=>r[p]!=null).map(r=>Number(r[p]));
+    const vals=convertedReadings.filter(r=>r[p]!=null).map(r=>Number(r[p]));
     if(!vals.length) return null;
     const safe=PARAM_SAFE[p];
     const latest_v=vals[vals.length-1];
     const avg=Math.round(mean(vals)*100)/100;
     const stability=stabilityScore(vals);
-    const forecast=trendForecast(readings,p,7);
-    const roc=rateOfChange(readings,p);
+    const forecast=trendForecast(convertedReadings,p,7);
+    const roc=rateOfChange(convertedReadings,p);
     const inRange=latest_v>=safe.min&&latest_v<=safe.max;
     const pctFromSafe=latest_v<safe.min?(((safe.min-latest_v)/safe.min)*100).toFixed(1):latest_v>safe.max?(((latest_v-safe.max)/safe.max)*100).toFixed(1):0;
-    // rising/falling flag
     const rising=roc!==null&&roc>5;
     const falling=roc!==null&&roc<-5;
     const forecastOORange=forecast&&(forecast.value<safe.min||forecast.value>safe.max);
-    return {p,label:PARAM_LABELS[p],latest:latest_v,avg,stability,forecast,roc,inRange,pctFromSafe,rising,falling,forecastOORange,color:safe.color};
+    const alkNote = p==="alkalinity"&&!isSW ? " (dKH)" : "";
+    return {p,label:PARAM_LABELS[p]+alkNote,latest:latest_v,avg,stability,forecast,roc,inRange,pctFromSafe,rising,falling,forecastOORange,color:safe.color};
   }).filter(Boolean);
 
   function StabilityBar({score}) {
