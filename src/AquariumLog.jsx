@@ -60,18 +60,46 @@ const PARAM_SAFE = {
   ammonia:   {min:0,   max:0,    color:"#f87171"},
 };
 
-const NAV = [
-  {id:"Dashboard",   icon:"📊"},
-  {id:"Insights",    icon:"🧠"},
-  {id:"Parameters",  icon:"💧"},
-  {id:"Maintenance", icon:"🔧"},
-  {id:"Livestock",   icon:"🐟"},
-  {id:"Scheduler",   icon:"📅"},
-  {id:"Bioload",     icon:"⚖️"},
-  {id:"My Tanks",    icon:"🪸"},
-  {id:"Diary",       icon:"📓"},
-  {id:"Manage Tanks",icon:"⚙️"},
+// ─── Grouped navigation ───────────────────────────────────────────────────────
+const NAV_GROUPS = [
+  {
+    label: "Overview",
+    items: [
+      {id:"Dashboard",    icon:"📊"},
+    ]
+  },
+  {
+    label: "Log Data",
+    items: [
+      {id:"Parameters",   icon:"💧"},
+      {id:"Maintenance",  icon:"🔧"},
+      {id:"Livestock",    icon:"🐟"},
+    ]
+  },
+  {
+    label: "AI & Analysis",
+    items: [
+      {id:"Insights",     icon:"🧠"},
+      {id:"Bioload",      icon:"⚖️"},
+    ]
+  },
+  {
+    label: "Planning",
+    items: [
+      {id:"Scheduler",    icon:"📅"},
+      {id:"Diary",        icon:"📓"},
+    ]
+  },
+  {
+    label: "Tanks",
+    items: [
+      {id:"My Tanks",     icon:"🪸"},
+      {id:"Manage Tanks", icon:"⚙️"},
+    ]
+  },
 ];
+// Flat list for mobile menu and routing
+const NAV = NAV_GROUPS.flatMap(g => g.items);
 
 // ─── Multi-axis chart pairs (correlated parameters) ───────────────────────────
 const CHART_PAIRS = {
@@ -456,12 +484,22 @@ export default function App() {
         <span style={{fontWeight:700,fontSize:16,color:"#7dd3fc",whiteSpace:"nowrap"}}>AquaLog</span>
         <span style={{color:"#334155"}} className="hide-mobile">|</span>
 
-        {/* Desktop nav */}
-        <nav className="nav-desktop" style={{display:"flex",gap:2,flexWrap:"nowrap",overflowX:"auto",overflowY:"hidden",scrollbarWidth:"none",msOverflowStyle:"none",flex:1}}>
-          {NAV.map(n => (
-            <button key={n.id} onClick={() => setPage(n.id)} style={{background:page===n.id?"rgba(56,189,248,0.15)":"transparent",color:page===n.id?"#7dd3fc":"#64748b",border:page===n.id?"1px solid rgba(56,189,248,0.3)":"1px solid transparent",borderRadius:8,padding:"4px 8px",cursor:"pointer",fontSize:11,fontWeight:600,whiteSpace:"nowrap",flexShrink:0}}>
-              {n.icon} {n.id}
-            </button>
+        {/* Desktop nav — grouped */}
+        <nav className="nav-desktop" style={{display:"flex",gap:6,flexWrap:"nowrap",overflowX:"auto",overflowY:"hidden",scrollbarWidth:"none",msOverflowStyle:"none",flex:1,alignItems:"center"}}>
+          {NAV_GROUPS.map((group,gi) => (
+            <div key={group.label} style={{display:"flex",alignItems:"center",gap:1,background:"#07111f",borderRadius:9,padding:"2px",border:"1px solid #1e3a5f",flexShrink:0}}>
+              {group.items.map(n => (
+                <button key={n.id} onClick={() => setPage(n.id)} style={{
+                  background:page===n.id?"rgba(56,189,248,0.2)":"transparent",
+                  color:page===n.id?"#7dd3fc":"#64748b",
+                  border:"none",
+                  borderRadius:7,padding:"4px 9px",cursor:"pointer",fontSize:11,fontWeight:600,whiteSpace:"nowrap",
+                  transition:"all .15s"
+                }}>
+                  {n.icon} {n.id}
+                </button>
+              ))}
+            </div>
           ))}
         </nav>
 
@@ -477,14 +515,21 @@ export default function App() {
         </div>
       </header>
 
-      {/* Mobile dropdown menu */}
+      {/* Mobile dropdown menu — grouped */}
       {menuOpen && (
-        <div style={{background:"#0a1628",borderBottom:"1px solid #1e3a5f",padding:"8px 12px",display:"flex",flexDirection:"column",gap:4,position:"sticky",top:52,zIndex:99}}>
-          {NAV.map(n => (
-            <button key={n.id} onClick={() => {setPage(n.id);setMenuOpen(false);}}
-              style={{background:page===n.id?"rgba(56,189,248,0.15)":"transparent",color:page===n.id?"#7dd3fc":"#94a3b8",border:"none",borderRadius:8,padding:"10px 14px",cursor:"pointer",fontSize:14,fontWeight:600,textAlign:"left"}}>
-              {n.icon} {n.id}
-            </button>
+        <div style={{background:"#0a1628",borderBottom:"1px solid #1e3a5f",padding:"10px 14px",position:"sticky",top:52,zIndex:99}}>
+          {NAV_GROUPS.map(group => (
+            <div key={group.label} style={{marginBottom:8}}>
+              <div style={{fontSize:10,color:"#334155",fontWeight:700,textTransform:"uppercase",letterSpacing:".1em",marginBottom:4,paddingLeft:6}}>{group.label}</div>
+              <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
+                {group.items.map(n => (
+                  <button key={n.id} onClick={() => {setPage(n.id);setMenuOpen(false);}}
+                    style={{background:page===n.id?"rgba(56,189,248,0.15)":"#07111f",color:page===n.id?"#7dd3fc":"#94a3b8",border:`1px solid ${page===n.id?"rgba(56,189,248,0.3)":"#1e3a5f"}`,borderRadius:8,padding:"7px 14px",cursor:"pointer",fontSize:13,fontWeight:600}}>
+                    {n.icon} {n.id}
+                  </button>
+                ))}
+              </div>
+            </div>
           ))}
         </div>
       )}
@@ -1603,94 +1648,91 @@ function Scheduler({tanks,tasks,setTasks,showToast,tankName}) {
         ))}
       </div>
 
-      <div className="sched-grid">
-        {/* Task list */}
-        <div>
-          <div style={{display:"flex",gap:8,marginBottom:14,alignItems:"center",flexWrap:"wrap"}}>
-            <div style={{fontSize:13,fontWeight:700,color:"#cbd5e1"}}>Tasks</div>
-            <select value={filterTank} onChange={e=>setFilterTank(e.target.value)} style={{...S.sel,width:"auto",marginLeft:"auto"}}>
-              <option value="All">All Tanks</option>
+      {/* Add task form + presets — FULL WIDTH ON TOP */}
+      <div style={{...S.card,borderRadius:16,padding:20,marginBottom:20,borderTop:"3px solid #38bdf8"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:8}}>
+          <div style={{fontSize:13,fontWeight:700,color:"#7dd3fc"}}>➕ Add Task</div>
+          {/* Quick presets inline */}
+          <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+            {PRESET_TASKS.slice(0,5).map(p=>(
+              <button key={p.title} onClick={()=>setForm(prev=>({...prev,title:p.title,category:p.category,frequency_days:p.frequency_days}))}
+                style={{background:"#07111f",border:"1px solid #1e3a5f",borderRadius:7,padding:"4px 10px",cursor:"pointer",fontSize:11,color:"#64748b",whiteSpace:"nowrap"}}>
+                {p.title}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="grid-2">
+          <Field label="Tank">
+            <select value={form.tank} onChange={e=>set("tank",e.target.value)} style={S.sel}>
               {tanks.map(t=><option key={tankName(t)} value={tankName(t)}>{tankName(t)}</option>)}
             </select>
+          </Field>
+          <Field label="Task Name">
+            <input value={form.title} onChange={e=>set("title",e.target.value)} placeholder="e.g. Clean protein skimmer cup" style={S.inp}/>
+          </Field>
+        </div>
+        <div className="grid-2">
+          <Field label="Category">
+            <select value={form.category} onChange={e=>set("category",e.target.value)} style={S.sel}>
+              {TASK_CATS.map(c=><option key={c} value={c}>{c}</option>)}
+            </select>
+          </Field>
+          <Field label="Last Done (optional)">
+            <input type="date" value={form.last_done} onChange={e=>set("last_done",e.target.value)} style={S.inp}/>
+          </Field>
+        </div>
+        <Field label="Frequency">
+          <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:form.frequency_days===0?8:0}}>
+            {TASK_FREQS.map(f=>(
+              <button key={f.label} onClick={()=>set("frequency_days",f.days)} style={{background:form.frequency_days===f.days?"rgba(56,189,248,0.2)":"#07111f",border:`1px solid ${form.frequency_days===f.days?"#38bdf8":"#1e3a5f"}`,color:form.frequency_days===f.days?"#7dd3fc":"#64748b",borderRadius:7,padding:"4px 9px",cursor:"pointer",fontSize:11,fontWeight:600}}>{f.label}</button>
+            ))}
           </div>
+          {form.frequency_days===0&&<input type="number" min="1" value={form.customDays} onChange={e=>set("customDays",e.target.value)} placeholder="Enter days" style={S.inp}/>}
+        </Field>
+        <Field label="Notes">
+          <input value={form.notes} onChange={e=>set("notes",e.target.value)} placeholder="Any notes…" style={S.inp}/>
+        </Field>
+        <button onClick={addTask} disabled={saving} style={{...S.btn,width:"100%",opacity:saving?0.6:1,marginTop:4}}>
+          {saving?"💾 Saving…":"📅 Schedule Task"}
+        </button>
+      </div>
 
-          {overdue.length>0&&(
-            <div style={{marginBottom:14}}>
-              <div style={{fontSize:11,fontWeight:700,color:"#f87171",textTransform:"uppercase",letterSpacing:".07em",marginBottom:8}}>⚠️ Overdue ({overdue.length})</div>
-              <div style={{display:"flex",flexDirection:"column",gap:7}}>{overdue.map(t=><TaskRow key={t.id} t={t} showTank={filterTank==="All"}/>)}</div>
-            </div>
-          )}
-          {dueToday.length>0&&(
-            <div style={{marginBottom:14}}>
-              <div style={{fontSize:11,fontWeight:700,color:"#fbbf24",textTransform:"uppercase",letterSpacing:".07em",marginBottom:8}}>📅 Due Today ({dueToday.length})</div>
-              <div style={{display:"flex",flexDirection:"column",gap:7}}>{dueToday.map(t=><TaskRow key={t.id} t={t} showTank={filterTank==="All"}/>)}</div>
-            </div>
-          )}
-          {upcoming.length>0&&(
-            <div style={{marginBottom:14}}>
-              <div style={{fontSize:11,fontWeight:700,color:"#4ade80",textTransform:"uppercase",letterSpacing:".07em",marginBottom:8}}>✅ Upcoming ({upcoming.length})</div>
-              <div style={{display:"flex",flexDirection:"column",gap:7}}>{upcoming.map(t=><TaskRow key={t.id} t={t} showTank={filterTank==="All"}/>)}</div>
-            </div>
-          )}
-          {inactive.length>0&&(
-            <div>
-              <div style={{fontSize:11,fontWeight:700,color:"#475569",textTransform:"uppercase",letterSpacing:".07em",marginBottom:8}}>⏸ Paused ({inactive.length})</div>
-              <div style={{display:"flex",flexDirection:"column",gap:7}}>{inactive.map(t=><TaskRow key={t.id} t={t} showTank={filterTank==="All"}/>)}</div>
-            </div>
-          )}
-          {filtered.length===0&&<div style={{...S.card,padding:24,color:"#334155",textAlign:"center",fontSize:13}}>No tasks yet. Add one from the form →</div>}
+      {/* Task list — FULL WIDTH BELOW */}
+      <div>
+        <div style={{display:"flex",gap:8,marginBottom:14,alignItems:"center",flexWrap:"wrap"}}>
+          <div style={{fontSize:13,fontWeight:700,color:"#cbd5e1"}}>Scheduled Tasks</div>
+          <select value={filterTank} onChange={e=>setFilterTank(e.target.value)} style={{...S.sel,width:"auto",marginLeft:"auto"}}>
+            <option value="All">All Tanks</option>
+            {tanks.map(t=><option key={tankName(t)} value={tankName(t)}>{tankName(t)}</option>)}
+          </select>
         </div>
 
-        {/* Add task form + presets */}
-        <div style={{display:"flex",flexDirection:"column",gap:14}}>
-          <div style={{...S.card,borderRadius:16,padding:20,borderTop:"3px solid #38bdf8"}}>
-            <div style={{fontSize:13,fontWeight:700,color:"#7dd3fc",marginBottom:16}}>➕ Add Task</div>
-            <Field label="Tank">
-              <select value={form.tank} onChange={e=>set("tank",e.target.value)} style={S.sel}>
-                {tanks.map(t=><option key={tankName(t)} value={tankName(t)}>{tankName(t)}</option>)}
-              </select>
-            </Field>
-            <Field label="Task Name">
-              <input value={form.title} onChange={e=>set("title",e.target.value)} placeholder="e.g. Clean protein skimmer cup" style={S.inp}/>
-            </Field>
-            <Field label="Category">
-              <select value={form.category} onChange={e=>set("category",e.target.value)} style={S.sel}>
-                {TASK_CATS.map(c=><option key={c} value={c}>{c}</option>)}
-              </select>
-            </Field>
-            <Field label="Frequency">
-              <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:8}}>
-                {TASK_FREQS.map(f=>(
-                  <button key={f.label} onClick={()=>set("frequency_days",f.days)} style={{background:form.frequency_days===f.days?"rgba(56,189,248,0.2)":"#07111f",border:`1px solid ${form.frequency_days===f.days?"#38bdf8":"#1e3a5f"}`,color:form.frequency_days===f.days?"#7dd3fc":"#64748b",borderRadius:7,padding:"4px 9px",cursor:"pointer",fontSize:11,fontWeight:600}}>{f.label}</button>
-                ))}
-              </div>
-              {form.frequency_days===0&&<input type="number" min="1" value={form.customDays} onChange={e=>set("customDays",e.target.value)} placeholder="Days" style={S.inp}/>}
-            </Field>
-            <Field label="Last Done (optional)">
-              <input type="date" value={form.last_done} onChange={e=>set("last_done",e.target.value)} style={S.inp}/>
-            </Field>
-            <Field label="Notes">
-              <input value={form.notes} onChange={e=>set("notes",e.target.value)} placeholder="Any notes…" style={S.inp}/>
-            </Field>
-            <button onClick={addTask} disabled={saving} style={{...S.btn,width:"100%",opacity:saving?0.6:1,marginTop:4}}>
-              {saving?"💾 Saving…":"📅 Schedule Task"}
-            </button>
+        {overdue.length>0&&(
+          <div style={{marginBottom:14}}>
+            <div style={{fontSize:11,fontWeight:700,color:"#f87171",textTransform:"uppercase",letterSpacing:".07em",marginBottom:8}}>⚠️ Overdue ({overdue.length})</div>
+            <div style={{display:"flex",flexDirection:"column",gap:7}}>{overdue.map(t=><TaskRow key={t.id} t={t} showTank={filterTank==="All"}/>)}</div>
           </div>
-
-          {/* Quick presets */}
-          <div style={{...S.card,borderRadius:14,padding:16}}>
-            <div style={{fontSize:12,fontWeight:700,color:"#cbd5e1",marginBottom:12}}>⚡ Quick Presets</div>
-            <div style={{display:"flex",flexDirection:"column",gap:5}}>
-              {PRESET_TASKS.map(p=>(
-                <button key={p.title} onClick={()=>setForm(prev=>({...prev,title:p.title,category:p.category,frequency_days:p.frequency_days}))}
-                  style={{background:"#07111f",border:"1px solid #1e3a5f",borderRadius:8,padding:"7px 12px",cursor:"pointer",textAlign:"left",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                  <span style={{fontSize:12,color:"#94a3b8"}}>{p.title}</span>
-                  <span style={{fontSize:10,color:"#475569",whiteSpace:"nowrap",marginLeft:6}}>every {p.frequency_days}d</span>
-                </button>
-              ))}
-            </div>
+        )}
+        {dueToday.length>0&&(
+          <div style={{marginBottom:14}}>
+            <div style={{fontSize:11,fontWeight:700,color:"#fbbf24",textTransform:"uppercase",letterSpacing:".07em",marginBottom:8}}>📅 Due Today ({dueToday.length})</div>
+            <div style={{display:"flex",flexDirection:"column",gap:7}}>{dueToday.map(t=><TaskRow key={t.id} t={t} showTank={filterTank==="All"}/>)}</div>
           </div>
-        </div>
+        )}
+        {upcoming.length>0&&(
+          <div style={{marginBottom:14}}>
+            <div style={{fontSize:11,fontWeight:700,color:"#4ade80",textTransform:"uppercase",letterSpacing:".07em",marginBottom:8}}>✅ Upcoming ({upcoming.length})</div>
+            <div style={{display:"flex",flexDirection:"column",gap:7}}>{upcoming.map(t=><TaskRow key={t.id} t={t} showTank={filterTank==="All"}/>)}</div>
+          </div>
+        )}
+        {inactive.length>0&&(
+          <div>
+            <div style={{fontSize:11,fontWeight:700,color:"#475569",textTransform:"uppercase",letterSpacing:".07em",marginBottom:8}}>⏸ Paused ({inactive.length})</div>
+            <div style={{display:"flex",flexDirection:"column",gap:7}}>{inactive.map(t=><TaskRow key={t.id} t={t} showTank={filterTank==="All"}/>)}</div>
+          </div>
+        )}
+        {filtered.length===0&&<div style={{...S.card,padding:24,color:"#334155",textAlign:"center",fontSize:13}}>No tasks yet. Add one above ↑</div>}
       </div>
     </div>
   );
