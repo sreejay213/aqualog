@@ -54,11 +54,20 @@ const PARAM_SAFE = {
   phosphate: {min:0,   max:0.1,  color:"#f472b6"},
   salinity:  {min:33,  max:36,   color:"#38bdf8"},
   ph:        {min:7.2, max:8.4,  color:"#fbbf24"},
-  alkalinity:{min:8,   max:12,   color:"#a78bfa"},
+  alkalinity:{min:8,   max:12,   color:"#a78bfa"}, // saltwater dKH
   calcium:   {min:380, max:450,  color:"#fb923c"},
   magnesium: {min:1250,max:1350, color:"#38bdf8"},
   ammonia:   {min:0,   max:0,    color:"#f87171"},
 };
+
+// Freshwater alkalinity safe range is 3–10 dKH (after ppm→dKH conversion)
+const ALK_SAFE_FW = {min:3, max:10, color:"#a78bfa"};
+
+// Returns the correct safe range object for a param, accounting for FW/SW alk
+function getSafe(param, isSW) {
+  if (param === "alkalinity" && !isSW) return ALK_SAFE_FW;
+  return PARAM_SAFE[param];
+}
 
 // ─── Grouped navigation ───────────────────────────────────────────────────────
 const NAV_GROUPS = [
@@ -231,12 +240,11 @@ async function fetchAISummary(tank, recentReadings, diaryEntries, lsLog) {
     const forecast=trendForecast(convertedReadings,p,7);
     const stability=stabilityScore(vals);
     const roc=rateOfChange(convertedReadings,p);
-    const safe=PARAM_SAFE[p];
+    const safe=getSafe(p,isSW);
     const latest=vals[vals.length-1];
     return {
       param:p, label:PARAM_LABELS[p],
       latest:Math.round(latest*100)/100,
-      avg:Math.round(mean(vals)*100)/100,
       stability, forecast,
       roc:roc?Math.round(roc*10)/10:null,
       outOfRange:latest<safe.min||latest>safe.max,
@@ -591,7 +599,19 @@ function Dashboard({tanks,params,diary,lsLog,tasks,activeTank,setActiveTank,tank
   const totalLive=liveTankLS.reduce((s,l)=>s+(l.qty||1),0);
   const dueTasks=tasks.filter(t=>t.tank===activeTank&&t.active&&t.next_due&&t.next_due<=TODAY_STR);
   const chartPairs=isSW?CHART_PAIRS.saltwater:CHART_PAIRS.freshwater;
-  const alerts=latest?Object.entries(PARAM_SAFE).filter(([k,safe])=>{const v=latest[k];return v!=null&&(v<safe.min||v>safe.max);}):[];
+  // Convert latest reading for display — FW alk ppm → dKH
+  const latestDisplay = latest ? {
+    ...latest,
+    alkalinity: (latest.alkalinity!=null && !isSW)
+      ? Math.round(Number(latest.alkalinity)*0.056*100)/100
+      : latest.alkalinity
+  } : null;
+
+  const alerts = latestDisplay ? Object.keys(PARAM_SAFE).filter(k=>{
+    const v = latestDisplay[k];
+    const safe = getSafe(k, isSW);
+    return v!=null && (v<safe.min || v>safe.max);
+  }).map(k => [k, getSafe(k, isSW)]) : [];
 
   return (
     <div>
@@ -599,11 +619,15 @@ function Dashboard({tanks,params,diary,lsLog,tasks,activeTank,setActiveTank,tank
         <div style={{background:"rgba(248,113,113,0.08)",border:"1px solid #f87171",borderRadius:12,padding:"12px 16px",marginBottom:14,display:"flex",flexWrap:"wrap",gap:8,alignItems:"center"}}>
           <span style={{fontSize:16}}>⚠️</span>
           <span style={{fontSize:12,fontWeight:700,color:"#f87171"}}>Parameter Alert — {activeTank}</span>
-          {alerts.map(([k,safe])=>{const v=latest[k],over=v>safe.max;return(
-            <span key={k} style={{fontSize:11,background:"rgba(248,113,113,0.15)",color:"#f87171",borderRadius:6,padding:"2px 10px",fontWeight:600}}>
-              {PARAM_LABELS[k]}: {v} {over?"↑ above":"↓ below"} {over?safe.max:safe.min}
-            </span>
-          );})}
+          {alerts.map(([k,safe])=>{
+            const v=latestDisplay[k],over=v>safe.max;
+            const unit=k==="alkalinity"?" dKH":"";
+            return(
+              <span key={k} style={{fontSize:11,background:"rgba(248,113,113,0.15)",color:"#f87171",borderRadius:6,padding:"2px 10px",fontWeight:600}}>
+                {PARAM_LABELS[k]}{unit?` (${unit.trim()})`:""}: {v}{unit} {over?"↑ above":"↓ below"} {over?safe.max:safe.min}
+              </span>
+            );
+          })}
         </div>
       )}
       {dueTasks.length>0&&(
@@ -622,7 +646,17 @@ function Dashboard({tanks,params,diary,lsLog,tasks,activeTank,setActiveTank,tank
             const last=params.filter(p=>p.tank===tn).sort((a,b)=>b.date.localeCompare(a.date))[0];
             const liveC=lsLog.filter(l=>l.tank===tn&&l.status==="Live").reduce((s,l)=>s+(l.qty||1),0);
             const isAct=activeTank===tn;
-            const hasAlert=last&&Object.entries(PARAM_SAFE).some(([k,s])=>last[k]!=null&&(last[k]<s.min||last[k]>s.max));
+            const isTankSW = t.type==="saltwater";
+            const lastDisplay = last ? {
+              ...last,
+              alkalinity: (last.alkalinity!=null && !isTankSW)
+                ? Math.round(Number(last.alkalinity)*0.056*100)/100
+                : last.alkalinity
+            } : null;
+            const hasAlert=lastDisplay&&Object.keys(PARAM_SAFE).some(k=>{
+              const safe=getSafe(k,isTankSW);
+              return lastDisplay[k]!=null&&(lastDisplay[k]<safe.min||lastDisplay[k]>safe.max);
+            });
             const dueC=tasks.filter(t=>t.tank===tn&&t.active&&t.next_due&&t.next_due<=TODAY_STR).length;
             return(
               <button key={tn} onClick={()=>setActiveTank(tn)} style={{background:isAct?`${tc}18`:"#07111f",border:`1.5px solid ${isAct?tc:tc+"44"}`,borderRadius:12,padding:"10px 8px",cursor:"pointer",textAlign:"left",width:"100%",position:"relative"}}>
@@ -681,7 +715,7 @@ function Dashboard({tanks,params,diary,lsLog,tasks,activeTank,setActiveTank,tank
                 const raw=rec[p];
                 const alk=p==="alkalinity"?alkDisplay(raw,isSW):null;
                 const displayVal=alk?alk.val:Number(raw);
-                const safe=PARAM_SAFE[p],ok=displayVal>=safe.min&&displayVal<=safe.max;
+                const safe=getSafe(p,isSW),ok=displayVal>=safe.min&&displayVal<=safe.max;
                 return(
                   <div key={p} style={{background:"#07111f",borderRadius:8,padding:"8px 10px",border:`1px solid ${ok?"transparent":"#f87171"}`}}>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:2}}>
@@ -846,8 +880,11 @@ function LogParams({tanks,params,setParams,showToast,tankName}) {
         {!isSW&&<div style={{background:"rgba(56,189,248,0.06)",border:"1px solid #1e3a5f",borderRadius:8,padding:"7px 12px",marginBottom:14,fontSize:11,color:"#64748b"}}>💡 Enter Alkalinity in <strong style={{color:"#7dd3fc"}}>ppm</strong> — it will be displayed as dKH (×0.056)</div>}
         <div className="grid-2" style={{marginBottom:16}}>
           {pKeys.map(p=>{
-            const v=vals[p],n=parseFloat(v),safe=PARAM_SAFE[p];
-            const ok=v!==""&&v!==undefined&&!isNaN(n)?(n>=safe.min&&n<=safe.max):null;
+            const v=vals[p],n=parseFloat(v);
+            // For FW alkalinity: input is ppm, convert to dKH for range check
+            const checkVal = (p==="alkalinity"&&!isSW&&!isNaN(n)) ? Math.round(n*0.056*100)/100 : n;
+            const safe=getSafe(p,isSW);
+            const ok=v!==""&&v!==undefined&&!isNaN(n)?(checkVal>=safe.min&&checkVal<=safe.max):null;
             const anomaly=v&&!isNaN(n)?detectAnomalies(params.filter(r=>r.tank===tank),p,v,isSW):null;
             const alkHint = p==="alkalinity"&&!isSW&&v?` → ${Math.round(parseFloat(v)*0.056*100)/100} dKH`:"";
             return (
@@ -924,7 +961,7 @@ function LogParams({tanks,params,setParams,showToast,tankName}) {
                             let display=row[p]!=null?Number(row[p]):null;
                             let extra=null;
                             if(p==="alkalinity"&&row[p]!=null){const a=alkDisplay(row[p],isSW);display=a.val;extra=!isSW?<div style={{fontSize:9,color:"#334155"}}>{a.raw}ppm</div>:null;}
-                            const safe=PARAM_SAFE[p];
+                            const safe=getSafe(p,isSW);
                             const ok=display!=null?(display>=safe.min&&display<=safe.max):null;
                             return(
                               <td key={p} style={{padding:"8px 10px",textAlign:"right"}}>
@@ -1791,9 +1828,8 @@ function Insights({tanks,params,diary,lsLog,activeTank,setActiveTank,tankName}) 
   const analytics = pKeys.map(p=>{
     const vals=convertedReadings.filter(r=>r[p]!=null).map(r=>Number(r[p]));
     if(!vals.length) return null;
-    const safe=PARAM_SAFE[p];
+    const safe=getSafe(p,isSW);
     const latest_v=vals[vals.length-1];
-    const avg=Math.round(mean(vals)*100)/100;
     const stability=stabilityScore(vals);
     const forecast=trendForecast(convertedReadings,p,7);
     const roc=rateOfChange(convertedReadings,p);
