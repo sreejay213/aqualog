@@ -1839,6 +1839,7 @@ function Insights({tanks,params,diary,lsLog,activeTank,setActiveTank,tankName}) 
     const falling=roc!==null&&roc<-5;
     const forecastOORange=forecast&&(forecast.value<safe.min||forecast.value>safe.max);
     const alkNote = p==="alkalinity"&&!isSW ? " (dKH)" : "";
+    const avg = Math.round(mean(vals) * 100) / 100;
     return {p,label:PARAM_LABELS[p]+alkNote,latest:latest_v,avg,stability,forecast,roc,inRange,pctFromSafe,rising,falling,forecastOORange,color:safe.color};
   }).filter(Boolean);
 
