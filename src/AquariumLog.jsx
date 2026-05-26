@@ -67,6 +67,7 @@ const NAV = [
   {id:"Maintenance", icon:"🔧"},
   {id:"Livestock",   icon:"🐟"},
   {id:"Scheduler",   icon:"📅"},
+  {id:"Bioload",     icon:"⚖️"},
   {id:"My Tanks",    icon:"🪸"},
   {id:"Diary",       icon:"📓"},
   {id:"Manage Tanks",icon:"⚙️"},
@@ -504,6 +505,7 @@ export default function App() {
           {page==="Maintenance"  && <LogMaint     {...pageProps}/>}
           {page==="Livestock"    && <LogLivestock {...pageProps}/>}
           {page==="Scheduler"    && <Scheduler    {...pageProps}/>}
+          {page==="Bioload"      && <Bioload      {...pageProps}/>}
           {page==="My Tanks"     && <MyTanks      {...pageProps}/>}
           {page==="Diary"        && <DiaryPage    {...pageProps}/>}
           {page==="Manage Tanks" && <ManageTanks  {...pageProps}/>}
@@ -1862,6 +1864,288 @@ function Insights({tanks,params,diary,lsLog,activeTank,setActiveTank,tankName}) 
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+// ─── Bioload & Compatibility AI ───────────────────────────────────────────────
+function Bioload({tanks,lsLog,params,showToast,tankName,activeTank,setActiveTank}) {
+  const [tank,    setTankSel]   = useState(activeTank||"");
+  const [aiText,  setAiText]    = useState("");
+  const [aiLoading,setAiLoading]= useState(false);
+  const [aiError, setAiError]   = useState("");
+  const [mode,    setMode]      = useState("bioload"); // "bioload" | "compatibility" | "move"
+  const [moveTo,  setMoveTo]    = useState("");
+  const [moveItem,setMoveItem]  = useState("");
+
+  useEffect(()=>{ if(!tank&&tanks.length) setTankSel(activeTank||tankName(tanks[0])); },[tanks,activeTank]);
+
+  const tankObj  = tanks.find(t=>(t.name||t.id)===tank);
+  const isSW     = tankObj?.type==="saltwater";
+  const color    = getTankColor(tank,tanks);
+  const liveTank = lsLog.filter(l=>l.tank===tank&&l.status==="Live");
+  const totalQty = liveTank.reduce((s,l)=>s+(l.qty||1),0);
+  const latest   = params.filter(p=>p.tank===tank).sort((a,b)=>b.date.localeCompare(a.date))[0];
+
+  function buildTankContext(tn) {
+    const t = tanks.find(x=>(x.name||x.id)===tn);
+    const ls = lsLog.filter(l=>l.tank===tn&&l.status==="Live");
+    const p  = params.filter(x=>x.tank===tn).sort((a,b)=>b.date.localeCompare(a.date))[0];
+    return {
+      name: tn,
+      type: t?.type||"unknown",
+      volume: t?.volume_gal||"unknown",
+      livestock: ls.map(l=>`${l.qty>1?l.qty+"× ":""}${l.name} (${l.type||"unknown"}, ${daysAlive(l.date_added)} days)`).join(", ")||"empty",
+      params: p ? Object.entries(PARAM_LABELS).filter(([k])=>p[k]!=null).map(([k,label])=>`${label}: ${p[k]}`).join(", ") : "no recent readings",
+    };
+  }
+
+  async function runAnalysis() {
+    if(!tankObj){showToast("Select a tank first","error");return;}
+    setAiLoading(true);setAiText("");setAiError("");
+    const ctx = buildTankContext(tank);
+    let prompt = "";
+
+    if(mode==="bioload") {
+      prompt = `You are an expert marine and freshwater aquarium biologist. Analyze this tank's bioload capacity and stocking level.
+
+Tank: ${ctx.name}
+Type: ${ctx.type} | Volume: ${ctx.volume} gallons
+Current inhabitants: ${ctx.livestock}
+Latest water parameters: ${ctx.params}
+
+Please provide:
+• Overall bioload assessment: Understocked / Appropriately stocked / Overstocked
+• Estimated bioload percentage used (e.g. "~60% of capacity")
+• Which species contribute most to bioload
+• Water quality impact based on current parameters
+• Specific recommendations:
+  - If understocked: What species would be good additions (compatible, appropriate for tank size and type)
+  - If overstocked: What to consider removing or rehoming
+  - Coral/plant additions if a reef tank
+• Maximum safe stocking recommendation for this tank size
+
+Be specific with numbers and species names. Keep response under 200 words, use bullet points (•).`;
+    }
+    else if(mode==="compatibility") {
+      prompt = `You are an expert aquarium biologist specializing in fish and coral compatibility.
+
+Tank: ${ctx.name}
+Type: ${ctx.type} | Volume: ${ctx.volume} gallons
+Current inhabitants: ${ctx.livestock}
+Latest parameters: ${ctx.params}
+
+Please analyze:
+• Are all current tank inhabitants compatible with each other? Flag any issues.
+• Aggression/territorial concerns between current species
+• Parameter compatibility (do all species share similar requirements?)
+• Any predator/prey risks currently in the tank
+• Top 3 species that would be GOOD additions (with reasons)
+• Top 3 species to AVOID adding (with reasons)
+
+Be specific. Use bullet points (•). Under 200 words.`;
+    }
+    else if(mode==="move" && moveTo && moveItem) {
+      const destCtx = buildTankContext(moveTo);
+      prompt = `You are an expert aquarium biologist. Analyze whether moving a livestock item between tanks is safe.
+
+MOVE REQUEST: Move "${moveItem}" from ${ctx.name} to ${moveTo}
+
+SOURCE TANK (${ctx.name}):
+Type: ${ctx.type} | Volume: ${ctx.volume}G
+Inhabitants: ${ctx.livestock}
+Parameters: ${ctx.params}
+
+DESTINATION TANK (${destCtx.name}):
+Type: ${destCtx.type} | Volume: ${destCtx.volume}G
+Inhabitants: ${destCtx.livestock}
+Parameters: ${destCtx.params}
+
+Please analyze:
+• Is this move SAFE or RISKY? (clear recommendation)
+• Compatibility with existing inhabitants in destination tank
+• Water parameter compatibility (salinity, pH, temperature needs)
+• Bioload impact on destination tank
+• Acclimation advice if the move is safe
+• Any specific risks or concerns
+
+Be direct with a clear Safe/Risky verdict. Use bullet points (•). Under 200 words.`;
+    }
+    else {
+      showToast(mode==="move"?"Select destination tank and item to move":"Unknown mode","error");
+      setAiLoading(false);return;
+    }
+
+    try {
+      const response = await fetch("/api/summary", {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({prompt}),
+      });
+      const data = await response.json();
+      if(data.error) throw new Error(data.error);
+      setAiText(data.text);
+    } catch(e) {
+      setAiError("AI error: "+e.message);
+    }
+    setAiLoading(false);
+  }
+
+  const destTankObj = tanks.find(t=>(t.name||t.id)===moveTo);
+  const destLive    = lsLog.filter(l=>l.tank===moveTo&&l.status==="Live");
+
+  return (
+    <div>
+      <div style={{marginBottom:20}}>
+        <div style={{fontSize:20,fontWeight:700,color:"#e2e8f0",marginBottom:3}}>⚖️ Bioload & Compatibility</div>
+        <div style={{fontSize:13,color:"#475569"}}>AI analysis of stocking levels, species compatibility, and safe moves between tanks</div>
+      </div>
+
+      {/* Tank selector */}
+      <div style={{display:"flex",gap:6,marginBottom:18,flexWrap:"wrap"}}>
+        {tanks.map(t=>{const tn=tankName(t),tc=getTankColor(tn,tanks);return(
+          <button key={tn} onClick={()=>{setTankSel(tn);setActiveTank(tn);setAiText("");}}
+            style={{background:tank===tn?`${tc}22`:"#0d1a2d",border:`1.5px solid ${tank===tn?tc:"#1e3a5f"}`,borderRadius:10,padding:"6px 14px",cursor:"pointer",color:tank===tn?tc:"#64748b",fontWeight:600,fontSize:12,whiteSpace:"nowrap"}}>
+            {t.type==="saltwater"?"🪸":"🐡"} {tn}
+          </button>
+        );})}
+      </div>
+
+      <div className="grid-2" style={{marginBottom:18,alignItems:"start"}}>
+        {/* Left — tank snapshot */}
+        <div style={{...S.card,borderTop:`3px solid ${color}`}}>
+          <div style={{fontSize:12,fontWeight:700,color:"#cbd5e1",marginBottom:12}}>
+            {isSW?"🪸":"🐡"} {tank} — Current Stock
+          </div>
+          <div style={{display:"flex",gap:16,marginBottom:12,flexWrap:"wrap"}}>
+            <div style={{background:"#07111f",borderRadius:8,padding:"8px 14px",textAlign:"center"}}>
+              <div style={{fontSize:22,fontWeight:700,color:color,fontFamily:"'DM Mono',monospace"}}>{totalQty}</div>
+              <div style={{fontSize:10,color:"#475569"}}>Total Inhabitants</div>
+            </div>
+            <div style={{background:"#07111f",borderRadius:8,padding:"8px 14px",textAlign:"center"}}>
+              <div style={{fontSize:22,fontWeight:700,color:"#38bdf8",fontFamily:"'DM Mono',monospace"}}>{tankObj?.volume_gal||"?"}</div>
+              <div style={{fontSize:10,color:"#475569"}}>Gallons</div>
+            </div>
+            <div style={{background:"#07111f",borderRadius:8,padding:"8px 14px",textAlign:"center"}}>
+              <div style={{fontSize:22,fontWeight:700,color:"#a78bfa",fontFamily:"'DM Mono',monospace"}}>
+                {tankObj?.volume_gal?Math.round(totalQty/(tankObj.volume_gal)*10)/10:"?"}
+              </div>
+              <div style={{fontSize:10,color:"#475569"}}>Fish per Gallon</div>
+            </div>
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:4}}>
+            {liveTank.map((l,i)=>(
+              <div key={l.id||i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:"#07111f",borderRadius:7,padding:"6px 10px"}}>
+                <div>
+                  <div style={{fontSize:12,color:"#e2e8f0",fontWeight:600}}>{l.qty>1?`${l.qty}× `:""}{l.name}</div>
+                  <div style={{fontSize:10,color:"#475569"}}>{l.type} · {daysAlive(l.date_added)}d</div>
+                </div>
+              </div>
+            ))}
+            {liveTank.length===0&&<div style={{fontSize:12,color:"#334155",padding:8}}>No livestock recorded.</div>}
+          </div>
+          {latest&&(
+            <div style={{marginTop:10,background:"#07111f",borderRadius:7,padding:"8px 10px",fontSize:11,color:"#64748b"}}>
+              <span style={{fontWeight:600,color:"#475569"}}>Latest params: </span>
+              {(isSW?SW_PARAMS:FW_PARAMS).filter(p=>latest[p]!=null).map(p=>`${p}: ${latest[p]}`).join(" · ")}
+            </div>
+          )}
+        </div>
+
+        {/* Right — analysis type + run */}
+        <div style={{display:"flex",flexDirection:"column",gap:14}}>
+          {/* Mode selector */}
+          <div style={{...S.card,borderRadius:14}}>
+            <div style={{fontSize:12,fontWeight:700,color:"#cbd5e1",marginBottom:12}}>Analysis Type</div>
+            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+              {[
+                {k:"bioload",     icon:"⚖️", label:"Bioload Assessment",      desc:"How loaded is this tank? What can I add or should remove?"},
+                {k:"compatibility",icon:"🤝",label:"Compatibility Check",      desc:"Are current inhabitants compatible? What's safe to add?"},
+                {k:"move",        icon:"🔄", label:"Move Between Tanks",       desc:"Is it safe to move a fish/coral to another tank?"},
+              ].map(m=>(
+                <button key={m.k} onClick={()=>{setMode(m.k);setAiText("");}}
+                  style={{background:mode===m.k?"rgba(56,189,248,0.1)":"#07111f",border:`1.5px solid ${mode===m.k?"#38bdf8":"#1e3a5f"}`,borderRadius:10,padding:"10px 14px",cursor:"pointer",textAlign:"left",transition:"all .15s"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:3}}>
+                    <span style={{fontSize:16}}>{m.icon}</span>
+                    <span style={{fontSize:13,fontWeight:700,color:mode===m.k?"#7dd3fc":"#94a3b8"}}>{m.label}</span>
+                  </div>
+                  <div style={{fontSize:11,color:"#475569",marginLeft:24}}>{m.desc}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Move config */}
+          {mode==="move"&&(
+            <div style={{...S.card,borderRadius:14}}>
+              <div style={{fontSize:12,fontWeight:700,color:"#cbd5e1",marginBottom:10}}>Move Details</div>
+              <Field label="Item to Move">
+                <select value={moveItem} onChange={e=>setMoveItem(e.target.value)} style={S.sel}>
+                  <option value="">— select from {tank} —</option>
+                  {liveTank.map(l=><option key={l.id} value={l.name}>{l.qty>1?`${l.qty}× `:""}{l.name}</option>)}
+                </select>
+              </Field>
+              <Field label="Destination Tank">
+                <select value={moveTo} onChange={e=>setMoveTo(e.target.value)} style={S.sel}>
+                  <option value="">— select destination —</option>
+                  {tanks.filter(t=>tankName(t)!==tank).map(t=><option key={tankName(t)} value={tankName(t)}>{tankName(t)}</option>)}
+                </select>
+              </Field>
+              {moveTo&&(
+                <div style={{background:"#07111f",borderRadius:7,padding:"8px 10px",fontSize:11,color:"#64748b",marginTop:4}}>
+                  <span style={{fontWeight:600,color:"#475569"}}>Destination: </span>
+                  {destTankObj?.type==="saltwater"?"🪸":"🐡"} {moveTo} · {destTankObj?.volume_gal||"?"}G · {destLive.length} species
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Run button */}
+          <button onClick={runAnalysis} disabled={aiLoading||!liveTank.length}
+            style={{...S.btn,width:"100%",opacity:aiLoading||!liveTank.length?0.6:1,
+              background:"linear-gradient(135deg,#581c87,#7c3aed)",fontSize:14,padding:"14px"}}>
+            {aiLoading?"🧠 Analysing…":
+             mode==="bioload"?"⚖️ Analyse Bioload":
+             mode==="compatibility"?"🤝 Check Compatibility":
+             "🔄 Check Move Safety"}
+          </button>
+        </div>
+      </div>
+
+      {/* AI Result */}
+      {(aiText||aiError||aiLoading)&&(
+        <div style={{...S.card,borderTop:"3px solid #7c3aed"}}>
+          <div style={{fontSize:13,fontWeight:700,color:"#a78bfa",marginBottom:14}}>
+            {mode==="bioload"?"⚖️ Bioload Analysis":mode==="compatibility"?"🤝 Compatibility Report":"🔄 Move Safety Analysis"} — {tank}
+            {mode==="move"&&moveTo&&<span style={{color:"#64748b"}}> → {moveTo}</span>}
+          </div>
+          {aiLoading&&(
+            <div style={{display:"flex",alignItems:"center",gap:10,padding:"16px 0",color:"#64748b",fontSize:13}}>
+              <div style={{width:18,height:18,border:"2px solid #1e3a5f",borderTopColor:"#7c3aed",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
+              Consulting AI aquarium expert…
+            </div>
+          )}
+          {aiError&&<div style={{background:"rgba(248,113,113,0.1)",border:"1px solid #f87171",borderRadius:8,padding:"10px 14px",fontSize:12,color:"#f87171"}}>{aiError}</div>}
+          {aiText&&(
+            <div style={{background:"rgba(124,58,237,0.06)",border:"1px solid rgba(124,58,237,0.25)",borderRadius:10,padding:"16px 18px"}}>
+              {aiText.split("\n").filter(Boolean).map((line,i)=>{
+                const isBullet = line.trim().startsWith("•") || line.trim().startsWith("-");
+                const isSafe   = line.toLowerCase().includes("safe") && !line.toLowerCase().includes("not safe") && !line.toLowerCase().includes("unsafe");
+                const isRisky  = line.toLowerCase().includes("risky") || line.toLowerCase().includes("risk") || line.toLowerCase().includes("overstocked") || line.toLowerCase().includes("unsafe");
+                const lineColor = isSafe?"#4ade80":isRisky?"#f87171":"#cbd5e1";
+                return(
+                  <div key={i} style={{fontSize:13,color:lineColor,lineHeight:1.7,marginBottom:isBullet?5:0}}>
+                    {isBullet
+                      ? <><span style={{color:"#a78bfa",marginRight:6}}>•</span>{line.replace(/^[•\-]\s*/,"")}</>
+                      : <span style={{fontWeight:line.length<60?700:400}}>{line}</span>
+                    }
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

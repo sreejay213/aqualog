@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180" width="180" height="180">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0a1628"/>
+      <stop offset="100%" style="stop-color:#0d2040"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="44%" r="35%">
+      <stop offset="0%" style="stop-color:#0ea5e9;stop-opacity:0.3"/>
+      <stop offset="100%" style="stop-color:#0ea5e9;stop-opacity:0"/>
+    </radialGradient>
+    <clipPath id="rounded">
+      <rect width="180" height="180" rx="38" ry="38"/>
+    </clipPath>
+  </defs>
+
+  <!-- Background -->
+  <rect width="180" height="180" rx="38" ry="38" fill="url(#bg)"/>
+
+  <!-- Glow -->
+  <ellipse cx="90" cy="79" rx="63" ry="63" fill="url(#glow)" clip-path="url(#rounded)"/>
+
+  <!-- Water waves -->
+  <path d="M20 120 Q45 110 70 120 Q95 130 120 120 Q145 110 165 120" stroke="#1e3a5f" stroke-width="1.5" fill="none" opacity="0.6"/>
+  <path d="M15 132 Q40 122 65 132 Q90 142 115 132 Q140 122 168 132" stroke="#1e3a5f" stroke-width="1" fill="none" opacity="0.4"/>
+
+  <!-- Fish body -->
+  <ellipse cx="88" cy="80" rx="32" ry="20" fill="#f97316"/>
+  <ellipse cx="88" cy="80" rx="30" ry="18" fill="#fb923c"/>
+
+  <!-- Fish tail -->
+  <polygon points="56,80 42,62 42,98" fill="#ea580c"/>
+
+  <!-- Fish belly -->
+  <ellipse cx="92" cy="85" rx="22" ry="10" fill="#fed7aa" opacity="0.6"/>
+
+  <!-- Fish eye -->
+  <circle cx="110" cy="74" r="5" fill="white"/>
+  <circle cx="111" cy="74" r="3" fill="#1e3a5f"/>
+  <circle cx="112" cy="73" r="1" fill="white"/>
+
+  <!-- Fish stripes -->
+  <path d="M85 61 Q82 80 85 99" stroke="#ea580c" stroke-width="2.5" fill="none" opacity="0.7"/>
+  <path d="M96 62 Q93 80 96 98" stroke="#ea580c" stroke-width="2" fill="none" opacity="0.5"/>
+
+  <!-- Fin on top -->
+  <path d="M75 62 Q83 48 100 58" stroke="#f97316" stroke-width="3" fill="none" stroke-linecap="round"/>
+
+  <!-- Blue accent dots (water bubbles) -->
+  <circle cx="130" cy="55" r="3" fill="#38bdf8" opacity="0.6"/>
+  <circle cx="142" cy="44" r="2" fill="#38bdf8" opacity="0.4"/>
+  <circle cx="122" cy="46" r="1.5" fill="#7dd3fc" opacity="0.5"/>
+
+  <!-- AQUALOG text -->
+  <text x="90" y="155" font-family="system-ui,-apple-system,sans-serif" font-size="15" font-weight="700" fill="#7dd3fc" text-anchor="middle" letter-spacing="2">AQUALOG</text>
+</svg>
