@@ -415,8 +415,113 @@ class ErrorBoundary extends React.Component {
   }
 }
 
+// ─── Login / Sign-up Screen ───────────────────────────────────────────────────
+function LoginScreen() {
+  const [mode, setMode]       = useState("login"); // "login" | "signup" | "reset"
+  const [email, setEmail]     = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState(null); // {text, type}
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setLoading(true);
+    setMessage(null);
+    if (mode === "login") {
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) setMessage({ text: error.message, type: "error" });
+    } else if (mode === "signup") {
+      const { error } = await supabase.auth.signUp({ email, password });
+      if (error) setMessage({ text: error.message, type: "error" });
+      else setMessage({ text: "Check your email for a confirmation link!", type: "success" });
+    } else if (mode === "reset") {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: window.location.origin,
+      });
+      if (error) setMessage({ text: error.message, type: "error" });
+      else setMessage({ text: "Password reset email sent!", type: "success" });
+    }
+    setLoading(false);
+  }
+
+  const inp = {
+    width:"100%", padding:"11px 14px", background:"#07111f",
+    border:"1px solid #1e3a5f", borderRadius:10, color:"#e2e8f0",
+    fontSize:14, outline:"none", boxSizing:"border-box",
+  };
+  const btn = {
+    width:"100%", padding:"12px", background:"linear-gradient(135deg,#0369a1,#0ea5e9)",
+    border:"none", borderRadius:10, color:"#fff", fontSize:14,
+    fontWeight:700, cursor:"pointer", marginTop:8,
+  };
+
+  return (
+    <div style={{minHeight:"100vh",background:"#080d1a",display:"flex",alignItems:"center",justifyContent:"center",padding:20,fontFamily:"'DM Sans','Segoe UI',sans-serif"}}>
+      <div style={{width:"100%",maxWidth:380}}>
+        {/* Logo */}
+        <div style={{textAlign:"center",marginBottom:32}}>
+          <div style={{fontSize:52,marginBottom:8}}>🐠</div>
+          <div style={{fontSize:24,fontWeight:800,color:"#7dd3fc",letterSpacing:1}}>AquaLog</div>
+          <div style={{fontSize:13,color:"#475569",marginTop:4}}>Your personal aquarium journal</div>
+        </div>
+
+        {/* Card */}
+        <div style={{background:"linear-gradient(135deg,#0a1628,#0d2040)",border:"1px solid #1e3a5f",borderRadius:18,padding:28}}>
+          <div style={{fontSize:16,fontWeight:700,color:"#e2e8f0",marginBottom:20,textAlign:"center"}}>
+            {mode === "login" ? "Welcome back" : mode === "signup" ? "Create your account" : "Reset password"}
+          </div>
+
+          <form onSubmit={handleSubmit} style={{display:"flex",flexDirection:"column",gap:12}}>
+            <input
+              type="email" placeholder="Email" required autoComplete="email"
+              value={email} onChange={e => setEmail(e.target.value)} style={inp}
+            />
+            {mode !== "reset" && (
+              <input
+                type="password" placeholder="Password (min 6 chars)" required
+                autoComplete={mode === "login" ? "current-password" : "new-password"}
+                value={password} onChange={e => setPassword(e.target.value)} style={inp}
+              />
+            )}
+            {message && (
+              <div style={{padding:"10px 14px",borderRadius:8,fontSize:13,
+                background: message.type === "error" ? "rgba(239,68,68,0.15)" : "rgba(34,197,94,0.15)",
+                color: message.type === "error" ? "#f87171" : "#4ade80",
+                border: `1px solid ${message.type === "error" ? "#7f1d1d" : "#14532d"}`}}>
+                {message.text}
+              </div>
+            )}
+            <button type="submit" style={btn} disabled={loading}>
+              {loading ? "..." : mode === "login" ? "Sign In" : mode === "signup" ? "Create Account" : "Send Reset Email"}
+            </button>
+          </form>
+
+          {/* Mode switchers */}
+          <div style={{marginTop:18,display:"flex",flexDirection:"column",gap:8,alignItems:"center"}}>
+            {mode === "login" && (<>
+              <button onClick={() => {setMode("signup");setMessage(null);}} style={{background:"none",border:"none",color:"#38bdf8",cursor:"pointer",fontSize:13}}>
+                New to AquaLog? Create account
+              </button>
+              <button onClick={() => {setMode("reset");setMessage(null);}} style={{background:"none",border:"none",color:"#475569",cursor:"pointer",fontSize:12}}>
+                Forgot password?
+              </button>
+            </>)}
+            {mode !== "login" && (
+              <button onClick={() => {setMode("login");setMessage(null);}} style={{background:"none",border:"none",color:"#38bdf8",cursor:"pointer",fontSize:13}}>
+                Back to sign in
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main App ─────────────────────────────────────────────────────────────────
 export default function App() {
+  const [user, setUser]         = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const [page, setPage]         = useState("Dashboard");
   const [tanks, setTanks]       = useState(FALLBACK_TANKS);
   const [params, setParams]     = useState([]);
@@ -433,6 +538,18 @@ export default function App() {
     setToast(msg); setToastType(type);
     setTimeout(() => setToast(null), 3200);
   }
+
+  // ── Auth state ──────────────────────────────────────────────────────────────
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null);
+      setAuthLoading(false);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
+    return () => subscription.unsubscribe();
+  }, []);
 
   // ── Request notification permission and schedule daily reminders ──
   useEffect(() => {
@@ -494,7 +611,15 @@ export default function App() {
 
   function tankName(t) { return t.name || t.id; }
 
-  const pageProps = { tanks, params, setParams, diary, setDiary, lsLog, setLsLog, tasks, setTasks, activeTank, setActiveTank, showToast, setTanks, tankName, loadAll };
+  const pageProps = { tanks, params, setParams, diary, setDiary, lsLog, setLsLog, tasks, setTasks, activeTank, setActiveTank, showToast, setTanks, tankName, loadAll, user };
+
+  if (authLoading) return (
+    <div style={{minHeight:"100vh",background:"#080d1a",display:"flex",alignItems:"center",justifyContent:"center"}}>
+      <div style={{color:"#38bdf8",fontSize:28}}>🐠</div>
+    </div>
+  );
+
+  if (!user) return <LoginScreen />;
 
   return (
     <ErrorBoundary>
@@ -535,6 +660,8 @@ export default function App() {
         <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0,marginLeft:8}}>
           <button onClick={loadAll} title="Refresh" style={{background:"none",border:"1px solid #1e3a5f",borderRadius:8,color:"#475569",cursor:"pointer",padding:"4px 10px",fontSize:12,whiteSpace:"nowrap",flexShrink:0}}>↻</button>
           <span className="header-ts" style={{fontSize:10,color:"#334155",whiteSpace:"nowrap"}}>{nowTs()}</span>
+          <span className="hide-mobile" style={{fontSize:10,color:"#475569",whiteSpace:"nowrap",maxWidth:120,overflow:"hidden",textOverflow:"ellipsis"}}>{user?.email}</span>
+          <button onClick={() => supabase.auth.signOut()} title="Sign out" style={{background:"none",border:"1px solid #1e3a5f",borderRadius:8,color:"#475569",cursor:"pointer",padding:"4px 10px",fontSize:11,whiteSpace:"nowrap",flexShrink:0}}>Sign out</button>
         </div>
       </header>
 
@@ -803,7 +930,7 @@ function Dashboard({tanks,params,diary,lsLog,tasks,activeTank,setActiveTank,tank
 
 
 // ─── Log Parameters ───────────────────────────────────────────────────────────
-function LogParams({tanks,params,setParams,showToast,tankName}) {
+function LogParams({tanks,params,setParams,showToast,tankName,user}) {
   const [tank,  setTank]    = useState("");
   const [date,  setDate]    = useState(TODAY_STR);
   const [vals,  setVals]    = useState({});
@@ -827,7 +954,7 @@ function LogParams({tanks,params,setParams,showToast,tankName}) {
 
   async function submit() {
     setSaving(true);
-    const entry={date,tank,notes:notes||null};
+    const entry={date,tank,notes:notes||null,user_id:user.id};
     pKeys.forEach(p=>{if(vals[p]!==""&&vals[p]!==undefined)entry[p]=parseFloat(vals[p]);});
     const {data,error}=await supabase.from("parameters").insert([entry]).select().single();
     if(error){showToast("Save failed: "+error.message,"error");}
@@ -1022,7 +1149,7 @@ function LogParams({tanks,params,setParams,showToast,tankName}) {
 }
 
 // ─── Log Maintenance ──────────────────────────────────────────────────────────
-function LogMaint({tanks,diary,setDiary,showToast,tankName}) {
+function LogMaint({tanks,diary,setDiary,showToast,tankName,user}) {
   const [tank, setTank]   = useState("");
   const [date, setDate]   = useState(TODAY_STR);
   const [cat,  setCat]    = useState("Water Change");
@@ -1036,7 +1163,7 @@ function LogMaint({tanks,diary,setDiary,showToast,tankName}) {
   async function submit() {
     setSaving(true);
     const n=cat==="Water Change"&&pct?`${pct}% Water Changed. ${notes}`.trim():notes;
-    const {data,error}=await supabase.from("diary").insert([{date,tank,category:cat,notes:n||null}]).select().single();
+    const {data,error}=await supabase.from("diary").insert([{date,tank,category:cat,notes:n||null,user_id:user.id}]).select().single();
     if(error){showToast("Save failed: "+error.message,"error");}
     else{setDiary(prev=>[data,...prev]);setNotes("");setPct("");showToast("Maintenance logged!");}
     setSaving(false);
@@ -1085,7 +1212,7 @@ function LogMaint({tanks,diary,setDiary,showToast,tankName}) {
 }
 
 // ─── Log Livestock ────────────────────────────────────────────────────────────
-function LogLivestock({tanks,lsLog,setLsLog,showToast,tankName}) {
+function LogLivestock({tanks,lsLog,setLsLog,showToast,tankName,user}) {
   const [tab,setTab]=useState("add");
   return (
     <div>
@@ -1118,7 +1245,7 @@ function LSAdd({tanks,lsLog,setLsLog,showToast,tankName}) {
     setSaving(true);
     let error;
     if(f.event==="Added"){
-      const res=await supabase.from("livestock").insert([{tank:f.tank,name:f.name.trim(),qty:Number(f.qty),type:f.type||"Unknown",date_added:f.dateAdded,status:"Live",comments:f.comments||null}]).select().single();
+      const res=await supabase.from("livestock").insert([{tank:f.tank,name:f.name.trim(),qty:Number(f.qty),type:f.type||"Unknown",date_added:f.dateAdded,status:"Live",comments:f.comments||null,user_id:user.id}]).select().single();
       error=res.error;
       if(!error){setLsLog(prev=>[...prev,res.data]);showToast(`${f.name} added!`);}
     } else if(f.event==="Died"||f.event==="Donated/Removed"){
@@ -1424,7 +1551,7 @@ function DiaryPage({tanks,diary,tankName}) {
 }
 
 // ─── Manage Tanks ─────────────────────────────────────────────────────────────
-function ManageTanks({tanks,setTanks,showToast,tankName,params,diary,lsLog}) {
+function ManageTanks({tanks,setTanks,showToast,tankName,params,diary,lsLog,user}) {
   const blank={name:"",type:"freshwater",volume_gal:"",dimensions:"",brand:"",location:"",equipment:"",notes:"",setup_date:TODAY_STR};
   const [form,setForm]=useState(blank);
   const [saving,setSaving]=useState(false);
@@ -1444,7 +1571,7 @@ function ManageTanks({tanks,setTanks,showToast,tankName,params,diary,lsLog}) {
     if(!form.name.trim()){showToast("Tank name is required","error");return;}
     if(tanks.find(t=>tankName(t)===form.name.trim())){showToast("A tank with that name already exists","error");return;}
     setSaving(true);
-    const entry={name:form.name.trim(),type:form.type,volume_gal:form.volume_gal?Number(form.volume_gal):null,dimensions:form.dimensions||null,brand:form.brand||null,location:form.location||null,equipment:form.equipment||null,notes:form.notes||null,setup_date:form.setup_date||TODAY_STR};
+    const entry={name:form.name.trim(),type:form.type,volume_gal:form.volume_gal?Number(form.volume_gal):null,dimensions:form.dimensions||null,brand:form.brand||null,location:form.location||null,equipment:form.equipment||null,notes:form.notes||null,setup_date:form.setup_date||TODAY_STR,user_id:user.id};
     const {data,error}=await supabase.from("tanks").insert([entry]).select().single();
     if(error){showToast("Save failed: "+error.message,"error");}
     else{setTanks(prev=>sortTanks([...prev,data]));setForm(blank);showToast(`${data.name} added!`);}
@@ -1539,7 +1666,7 @@ function ManageTanks({tanks,setTanks,showToast,tankName,params,diary,lsLog}) {
 }
 
 // ─── Scheduler ────────────────────────────────────────────────────────────────
-function Scheduler({tanks,tasks,setTasks,showToast,tankName}) {
+function Scheduler({tanks,tasks,setTasks,showToast,tankName,user}) {
   const blank={tank:"",title:"",category:"Maintenance",frequency_days:7,customDays:"",last_done:"",notes:""};
   const [form,setForm]=useState(blank);
   const [saving,setSaving]=useState(false);
@@ -1561,7 +1688,7 @@ function Scheduler({tanks,tasks,setTasks,showToast,tankName}) {
     const freq=form.frequency_days===0?Number(form.customDays):Number(form.frequency_days);
     if(!freq||freq<1){showToast("Please set a valid frequency","error");return;}
     setSaving(true);
-    const entry={tank:form.tank,title:form.title.trim(),category:form.category,frequency_days:freq,last_done:form.last_done||null,next_due:calcNextDue(form.last_done,freq),notes:form.notes||null,active:true};
+    const entry={tank:form.tank,title:form.title.trim(),category:form.category,frequency_days:freq,last_done:form.last_done||null,next_due:calcNextDue(form.last_done,freq),notes:form.notes||null,active:true,user_id:user.id};
     const {data,error}=await supabase.from("tasks").insert([entry]).select().single();
     if(error){showToast("Save failed: "+error.message,"error");}
     else{setTasks(prev=>[...prev,data]);setForm({...blank,tank:form.tank});showToast("Task scheduled!");}
