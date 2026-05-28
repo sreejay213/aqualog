@@ -106,6 +106,12 @@ const NAV_GROUPS = [
       {id:"Manage Tanks", icon:"⚙️"},
     ]
   },
+  {
+    label: "Support",
+    items: [
+      {id:"Help", icon:"❓"},
+    ]
+  },
 ];
 // Flat list for mobile menu and routing
 const NAV = NAV_GROUPS.flatMap(g => g.items);
@@ -761,6 +767,7 @@ export default function App() {
           {page==="My Tanks"     && <MyTanks      {...pageProps}/>}
           {page==="Diary"        && <DiaryPage    {...pageProps}/>}
           {page==="Manage Tanks" && <ManageTanks  {...pageProps}/>}
+          {page==="Help"         && <HelpPage />}
         </>
       </main>
     </div>
@@ -2429,6 +2436,140 @@ Be direct with a clear Safe/Risky verdict. Use bullet points (•). Under 200 wo
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Help Page ────────────────────────────────────────────────────────────────
+function HelpPage() {
+  const [open, setOpen] = useState(null);
+  const toggle = (id) => setOpen(prev => prev === id ? null : id);
+
+  const sections = [
+    {
+      id: "start", icon: "🚀", title: "Getting Started", color: "#38bdf8",
+      items: [
+        { q: "How do I add my first tank?", a: "Go to Manage Tanks in the navigation. Fill in your tank name, type (Freshwater, Saltwater/Reef, etc.), volume in gallons, and setup date. Hit Add Tank and it appears across the whole app immediately." },
+        { q: "What tank types are supported?", a: "Freshwater, Saltwater/Reef, Brackish, Planted, and Quarantine. The app automatically adjusts which water parameters are relevant — saltwater tanks show Salinity, Calcium, Magnesium, and Phosphate, while freshwater tanks show Ammonia and use a different Alkalinity range." },
+        { q: "Can I manage multiple tanks?", a: "Yes! Add as many tanks as you like. Use the tank selector tabs on each page to switch between them. The Dashboard shows a quick status overview of all tanks at once." },
+      ]
+    },
+    {
+      id: "dashboard", icon: "📊", title: "Dashboard", color: "#4ade80",
+      items: [
+        { q: "What does the Dashboard show?", a: "A full health snapshot of your active tank — latest parameter readings with safe range indicators, trend charts, recent diary entries, and a live livestock count. Tap any tank card at the top to switch tanks." },
+        { q: "What do the coloured parameter badges mean?", a: "Green = within safe range. Yellow/Orange = approaching the limit. Red = out of range and needs attention. Safe ranges follow established aquarium keeping standards." },
+        { q: "How do I change the chart time range?", a: "Use the 7d / 30d / 90d / All buttons above the charts. 30 days is the default." },
+      ]
+    },
+    {
+      id: "params", icon: "💧", title: "Logging Parameters", color: "#a78bfa",
+      items: [
+        { q: "How do I log a water test?", a: "Go to Parameters → select your tank and date → enter the values from your test kit → tap Save. You only need to fill in the parameters you tested — leave the rest blank." },
+        { q: "Can I edit or delete a reading?", a: "Yes. Scroll down to the reading history table and click the ✏️ icon to edit or 🗑️ to delete a row." },
+        { q: "What are the safe ranges?", a: "Saltwater: Nitrate 0–20 ppm, Phosphate 0–0.1 ppm, Salinity 33–36 ppt, pH 7.2–8.4, Alkalinity 8–12 dKH, Calcium 380–450 ppm, Magnesium 1250–1350 ppm. Freshwater: Nitrate 0–20 ppm, pH 7.2–8.4, Alkalinity 3–10 dKH, Ammonia 0 ppm." },
+        { q: "Why does the app warn me about an unusual value?", a: "If a value is statistically unusual compared to your own history (z-score above 2), the app flags it as a potential mistype and suggests your historical average. You can dismiss it and save anyway." },
+      ]
+    },
+    {
+      id: "maintenance", icon: "🔧", title: "Maintenance Log", color: "#fb923c",
+      items: [
+        { q: "What is the Maintenance log for?", a: "Log anything you do to your tank — water changes, filter cleans, dosing, feeding notes, equipment servicing. It builds a searchable history diary." },
+        { q: "How do I log a water change?", a: "Go to Maintenance → select category Water Change → a % field appears so you can record how much you changed → add notes → Save." },
+        { q: "Where can I see past entries?", a: "Recent entries show below the form. For full history with filtering, go to the Diary page." },
+      ]
+    },
+    {
+      id: "livestock", icon: "🐟", title: "Livestock Tracking", color: "#34d399",
+      items: [
+        { q: "How do I add a new fish or coral?", a: "Go to Livestock → select event Added → enter the name, quantity, type, and date added → Save. It appears in your live livestock list and counts toward your bioload." },
+        { q: "How do I record a death or removal?", a: "Go to Livestock → select Died or Donated/Removed → pick the name from your live list → Save. The record is kept in history but removed from your active count." },
+        { q: "How do I move a fish between tanks?", a: "Go to Livestock → select Moved Between Tanks → pick the fish and the destination tank → Save. The record moves to the new tank automatically." },
+      ]
+    },
+    {
+      id: "scheduler", icon: "📅", title: "Task Scheduler", color: "#fbbf24",
+      items: [
+        { q: "What is the Scheduler for?", a: "Set up recurring maintenance reminders — water changes, filter cleans, dosing, coral feeding, and more. The app tracks when each task is next due and highlights overdue ones in red." },
+        { q: "How do I create a task?", a: "Go to Scheduler → fill in the title, category, tank, frequency (daily / weekly / monthly / custom), and optionally the last time you did it → tap Schedule Task." },
+        { q: "How do I mark a task done?", a: "Tap the ✓ Done button on any task. The app calculates the next due date based on your frequency automatically." },
+        { q: "Can I pause a task without deleting it?", a: "Yes — use the toggle switch on each task to make it inactive. It stays in your list but won't show as due or overdue until you re-enable it." },
+      ]
+    },
+    {
+      id: "insights", icon: "🧠", title: "AI Insights", color: "#e879f9",
+      items: [
+        { q: "What does AI Insights do?", a: "Analyses your parameter history and generates personalised advice — identifying unstable, out-of-range, or trending parameters. It gives a plain-English summary with recommendations tailored to your tanks." },
+        { q: "How do I generate an AI summary?", a: "Go to Insights → tap Generate Summary. The app sends your last 30 days of readings and diary entries to the AI and returns a report in a few seconds." },
+        { q: "What are the stability scores?", a: "Each parameter gets a stability score (0–100%). High (80%+) = steady. Moderate (60–80%) = some swings. Low (<60%) = significant fluctuation that may stress livestock." },
+        { q: "What is a trend forecast?", a: "Using linear regression on your history, the app predicts where each parameter will be in 7 days. If the forecast goes out of safe range, a warning is shown so you can act early." },
+      ]
+    },
+    {
+      id: "bioload", icon: "⚖️", title: "Bioload & Compatibility", color: "#f87171",
+      items: [
+        { q: "What is the Bioload page?", a: "Gives an AI-powered assessment of whether your stocking level is sustainable and flags compatibility concerns between species — aggression, territory, and water parameter conflicts." },
+        { q: "How does compatibility work?", a: "It reviews your full livestock list and checks for known issues between species. It also advises on safe moves if you're thinking of combining tanks." },
+      ]
+    },
+    {
+      id: "account", icon: "👤", title: "Account & Data", color: "#94a3b8",
+      items: [
+        { q: "Is my data private?", a: "Yes. Each account has completely isolated data secured with Row Level Security. Other users cannot see your tanks, parameters, or any records." },
+        { q: "How do I sign out?", a: "Tap the Sign out button in the top-right corner of the header. You'll be returned to the login screen." },
+        { q: "How does a friend sign up?", a: "They open the app URL, click 'New to AquaLog? Create account', enter their email and password, and they're in with a clean, empty account ready to add their own tanks." },
+        { q: "How do I reset my password?", a: "On the login screen tap 'Forgot password?', enter your email, and you'll receive a reset link. Clicking it lands you on a Set New Password screen inside the app." },
+      ]
+    },
+  ];
+
+  return (
+    <div style={{maxWidth:760,width:"100%",margin:"0 auto"}}>
+      <div style={{marginBottom:24}}>
+        <div style={{fontSize:20,fontWeight:700,color:"#e2e8f0",marginBottom:4}}>❓ Help & FAQ</div>
+        <div style={{fontSize:13,color:"#475569"}}>Everything you need to know about using AquaLog</div>
+      </div>
+
+      {/* Quick nav pills */}
+      <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:24}}>
+        {sections.map(s => (
+          <button key={s.id} onClick={() => document.getElementById("help-"+s.id)?.scrollIntoView({behavior:"smooth",block:"start"})}
+            style={{background:"#07111f",border:"1px solid #1e3a5f",borderRadius:20,color:"#94a3b8",padding:"5px 14px",fontSize:12,cursor:"pointer",whiteSpace:"nowrap"}}>
+            {s.icon} {s.title}
+          </button>
+        ))}
+      </div>
+
+      {sections.map(section => (
+        <div key={section.id} id={"help-"+section.id} style={{marginBottom:28}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10,paddingBottom:8,borderBottom:"1px solid #1e3a5f"}}>
+            <span style={{fontSize:18}}>{section.icon}</span>
+            <span style={{fontSize:15,fontWeight:700,color:section.color}}>{section.title}</span>
+          </div>
+          {section.items.map((item, i) => {
+            const key = section.id+"-"+i;
+            const isOpen = open === key;
+            return (
+              <div key={key} style={{background:"linear-gradient(135deg,#0a1628,#0d2040)",border:"1px solid #1e3a5f",borderRadius:14,overflow:"hidden",marginBottom:8}}>
+                <button onClick={() => toggle(key)}
+                  style={{width:"100%",background:"none",border:"none",padding:"14px 18px",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",gap:12,textAlign:"left"}}>
+                  <span style={{fontSize:13,fontWeight:600,color:"#e2e8f0",lineHeight:1.4}}>{item.q}</span>
+                  <span style={{color:"#475569",fontSize:14,flexShrink:0,transition:"transform .2s",display:"inline-block",transform:isOpen?"rotate(180deg)":"rotate(0deg)"}}>▾</span>
+                </button>
+                {isOpen && (
+                  <div style={{padding:"0 18px 16px 18px",paddingTop:12,fontSize:13,color:"#94a3b8",lineHeight:1.8,borderTop:"1px solid #1e3a5f"}}>
+                    {item.a}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      ))}
+
+      <div style={{marginTop:8,padding:"16px 20px",background:"#07111f",borderRadius:12,border:"1px solid #1e3a5f",fontSize:12,color:"#475569",textAlign:"center"}}>
+        Still have questions? Log a note in your 📓 Diary or reach out to the AquaLog team.
+      </div>
     </div>
   );
 }
