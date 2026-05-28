@@ -431,7 +431,7 @@ function LoginScreen() {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) setMessage({ text: error.message, type: "error" });
     } else if (mode === "signup") {
-      const { error } = await supabase.auth.signUp({ email, password });
+      const { error } = await supabase.auth.signUp({ email, password, options: { emailRedirectTo: window.location.origin } });
       if (error) setMessage({ text: error.message, type: "error" });
       else setMessage({ text: "Check your email for a confirmation link!", type: "success" });
     } else if (mode === "reset") {
@@ -518,10 +518,60 @@ function LoginScreen() {
   );
 }
 
+// ─── Set New Password Screen (after clicking reset email link) ────────────────
+function SetNewPasswordScreen({ onDone }) {
+  const [password, setPassword]   = useState("");
+  const [confirm, setConfirm]     = useState("");
+  const [loading, setLoading]     = useState(false);
+  const [message, setMessage]     = useState(null);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (password !== confirm) { setMessage({ text: "Passwords don't match", type: "error" }); return; }
+    if (password.length < 6)  { setMessage({ text: "Password must be at least 6 characters", type: "error" }); return; }
+    setLoading(true);
+    const { error } = await supabase.auth.updateUser({ password });
+    if (error) setMessage({ text: error.message, type: "error" });
+    else { setMessage({ text: "Password updated! Taking you in…", type: "success" }); setTimeout(onDone, 1500); }
+    setLoading(false);
+  }
+
+  const inp = { width:"100%", padding:"11px 14px", background:"#07111f", border:"1px solid #1e3a5f", borderRadius:10, color:"#e2e8f0", fontSize:14, outline:"none", boxSizing:"border-box" };
+  const btn = { width:"100%", padding:"12px", background:"linear-gradient(135deg,#0369a1,#0ea5e9)", border:"none", borderRadius:10, color:"#fff", fontSize:14, fontWeight:700, cursor:"pointer", marginTop:8 };
+
+  return (
+    <div style={{minHeight:"100vh",background:"#080d1a",display:"flex",alignItems:"center",justifyContent:"center",padding:20,fontFamily:"'DM Sans','Segoe UI',sans-serif"}}>
+      <div style={{width:"100%",maxWidth:380}}>
+        <div style={{textAlign:"center",marginBottom:32}}>
+          <div style={{fontSize:52,marginBottom:8}}>🐠</div>
+          <div style={{fontSize:24,fontWeight:800,color:"#7dd3fc",letterSpacing:1}}>AquaLog</div>
+        </div>
+        <div style={{background:"linear-gradient(135deg,#0a1628,#0d2040)",border:"1px solid #1e3a5f",borderRadius:18,padding:28}}>
+          <div style={{fontSize:16,fontWeight:700,color:"#e2e8f0",marginBottom:20,textAlign:"center"}}>Set a new password</div>
+          <form onSubmit={handleSubmit} style={{display:"flex",flexDirection:"column",gap:12}}>
+            <input type="password" placeholder="New password (min 6 chars)" required value={password} onChange={e=>setPassword(e.target.value)} style={inp} autoComplete="new-password" />
+            <input type="password" placeholder="Confirm new password" required value={confirm} onChange={e=>setConfirm(e.target.value)} style={inp} autoComplete="new-password" />
+            {message && (
+              <div style={{padding:"10px 14px",borderRadius:8,fontSize:13,
+                background:message.type==="error"?"rgba(239,68,68,0.15)":"rgba(34,197,94,0.15)",
+                color:message.type==="error"?"#f87171":"#4ade80",
+                border:`1px solid ${message.type==="error"?"#7f1d1d":"#14532d"}`}}>
+                {message.text}
+              </div>
+            )}
+            <button type="submit" style={btn} disabled={loading}>{loading ? "Saving…" : "Set Password"}</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main App ─────────────────────────────────────────────────────────────────
 export default function App() {
   const [user, setUser]         = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
+  const [passwordRecovery, setPasswordRecovery] = useState(false);
   const [page, setPage]         = useState("Dashboard");
   const [tanks, setTanks]       = useState(FALLBACK_TANKS);
   const [params, setParams]     = useState([]);
@@ -545,8 +595,14 @@ export default function App() {
       setUser(session?.user ?? null);
       setAuthLoading(false);
     });
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "PASSWORD_RECOVERY") {
+        setPasswordRecovery(true);
+        setUser(session?.user ?? null);
+      } else {
+        setPasswordRecovery(false);
+        setUser(session?.user ?? null);
+      }
     });
     return () => subscription.unsubscribe();
   }, []);
@@ -620,6 +676,7 @@ export default function App() {
   );
 
   if (!user) return <LoginScreen />;
+  if (passwordRecovery) return <SetNewPasswordScreen onDone={() => setPasswordRecovery(false)} />;
 
   return (
     <ErrorBoundary>
