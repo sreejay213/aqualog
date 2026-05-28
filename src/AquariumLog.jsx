@@ -663,7 +663,7 @@ export default function App() {
     }
   }, []);
 
-  useEffect(() => { loadAll(); }, [loadAll]);
+  useEffect(() => { if (user) loadAll(); }, [user?.id]);
 
   function tankName(t) { return t.name || t.id; }
 
