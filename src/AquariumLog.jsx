@@ -477,32 +477,29 @@ function LoginScreen() {
             {mode === "login" ? "Welcome back" : mode === "signup" ? "Create your account" : "Reset password"}
           </div>
 
-          <form onSubmit={handleSubmit} autoComplete="on" action="" method="post" style={{display:"flex",flexDirection:"column",gap:12}}>
-            <input
-              id="email" name="email"
-              type="email" placeholder="Email" required autoComplete="username"
-              value={email} onChange={e => setEmail(e.target.value)} style={inp}
-            />
-            {mode !== "reset" && (
-              <input
-                id="password" name="password"
-                type="password" placeholder="Password (min 6 chars)" required
-                autoComplete={mode === "login" ? "current-password" : "new-password"}
-                value={password} onChange={e => setPassword(e.target.value)} style={inp}
-              />
-            )}
-            {message && (
-              <div style={{padding:"10px 14px",borderRadius:8,fontSize:13,
-                background: message.type === "error" ? "rgba(239,68,68,0.15)" : "rgba(34,197,94,0.15)",
-                color: message.type === "error" ? "#f87171" : "#4ade80",
-                border: `1px solid ${message.type === "error" ? "#7f1d1d" : "#14532d"}`}}>
-                {message.text}
-              </div>
-            )}
-            <button type="submit" style={btn} disabled={loading}>
-              {loading ? "..." : mode === "login" ? "Sign In" : mode === "signup" ? "Create Account" : "Send Reset Email"}
-            </button>
-          </form>
+          {mode === "login" && (
+            <form key="login" onSubmit={handleSubmit} autoComplete="on" style={{display:"flex",flexDirection:"column",gap:12}}>
+              <input id="email" name="email" type="email" placeholder="Email" required autoComplete="username" value={email} onChange={e => setEmail(e.target.value)} style={inp} />
+              <input id="password" name="password" type="password" placeholder="Password" required autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} style={inp} />
+              {message && <div style={{padding:"10px 14px",borderRadius:8,fontSize:13,background:message.type==="error"?"rgba(239,68,68,0.15)":"rgba(34,197,94,0.15)",color:message.type==="error"?"#f87171":"#4ade80",border:`1px solid ${message.type==="error"?"#7f1d1d":"#14532d"}`}}>{message.text}</div>}
+              <button type="submit" style={btn} disabled={loading}>{loading ? "..." : "Sign In"}</button>
+            </form>
+          )}
+          {mode === "signup" && (
+            <form key="signup" onSubmit={handleSubmit} autoComplete="off" style={{display:"flex",flexDirection:"column",gap:12}}>
+              <input name="email" type="email" placeholder="Email" required autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} style={inp} />
+              <input name="new-password" type="password" placeholder="Password (min 6 chars)" required autoComplete="new-password" value={password} onChange={e => setPassword(e.target.value)} style={inp} />
+              {message && <div style={{padding:"10px 14px",borderRadius:8,fontSize:13,background:message.type==="error"?"rgba(239,68,68,0.15)":"rgba(34,197,94,0.15)",color:message.type==="error"?"#f87171":"#4ade80",border:`1px solid ${message.type==="error"?"#7f1d1d":"#14532d"}`}}>{message.text}</div>}
+              <button type="submit" style={btn} disabled={loading}>{loading ? "..." : "Create Account"}</button>
+            </form>
+          )}
+          {mode === "reset" && (
+            <form key="reset" onSubmit={handleSubmit} style={{display:"flex",flexDirection:"column",gap:12}}>
+              <input name="email" type="email" placeholder="Email" required autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} style={inp} />
+              {message && <div style={{padding:"10px 14px",borderRadius:8,fontSize:13,background:message.type==="error"?"rgba(239,68,68,0.15)":"rgba(34,197,94,0.15)",color:message.type==="error"?"#f87171":"#4ade80",border:`1px solid ${message.type==="error"?"#7f1d1d":"#14532d"}`}}>{message.text}</div>}
+              <button type="submit" style={btn} disabled={loading}>{loading ? "..." : "Send Reset Email"}</button>
+            </form>
+          )}
 
           {/* Mode switchers */}
           <div style={{marginTop:18,display:"flex",flexDirection:"column",gap:8,alignItems:"center"}}>
