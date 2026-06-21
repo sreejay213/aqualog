@@ -477,15 +477,15 @@ function LoginScreen() {
             {mode === "login" ? "Welcome back" : mode === "signup" ? "Create your account" : "Reset password"}
           </div>
 
-          <form onSubmit={handleSubmit} autoComplete="on" style={{display:"flex",flexDirection:"column",gap:12}}>
+          <form onSubmit={handleSubmit} autoComplete="on" action="" method="post" style={{display:"flex",flexDirection:"column",gap:12}}>
             <input
               id="email" name="email"
-              type="email" placeholder="Email" required autoComplete="email"
+              type="email" placeholder="Email" required autoComplete="username"
               value={email} onChange={e => setEmail(e.target.value)} style={inp}
             />
             {mode !== "reset" && (
               <input
-                id="password" name={mode === "login" ? "current-password" : "new-password"}
+                id="password" name="password"
                 type="password" placeholder="Password (min 6 chars)" required
                 autoComplete={mode === "login" ? "current-password" : "new-password"}
                 value={password} onChange={e => setPassword(e.target.value)} style={inp}
