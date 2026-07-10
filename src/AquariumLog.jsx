@@ -805,87 +805,84 @@ function Dashboard({tanks,params,diary,lsLog,tasks,activeTank,setActiveTank,tank
 
   return (
     <div>
+      {/* ── Compact alert badges ── */}
       {alerts.length>0&&(
-        <div style={{background:"rgba(248,113,113,0.08)",border:"1px solid #f87171",borderRadius:12,padding:"12px 16px",marginBottom:14,display:"flex",flexWrap:"wrap",gap:8,alignItems:"center"}}>
-          <span style={{fontSize:16}}>⚠️</span>
-          <span style={{fontSize:12,fontWeight:700,color:"#f87171"}}>Parameter Alert — {activeTank}</span>
+        <div style={{display:"flex",alignItems:"center",gap:8,background:"rgba(248,113,113,0.07)",borderLeft:"3px solid #f87171",borderRadius:8,padding:"8px 14px",marginBottom:10,flexWrap:"wrap"}}>
+          <span style={{fontSize:13}}>⚠</span>
+          <span style={{fontSize:11,fontWeight:700,color:"#f87171",marginRight:4}}>{activeTank}</span>
           {alerts.map(([k,safe])=>{
             const v=latestDisplay[k],over=v>safe.max;
             const unit=k==="alkalinity"?" dKH":"";
             return(
-              <span key={k} style={{fontSize:11,background:"rgba(248,113,113,0.15)",color:"#f87171",borderRadius:6,padding:"2px 10px",fontWeight:600}}>
-                {PARAM_LABELS[k]}{unit?` (${unit.trim()})`:""}: {v}{unit} {over?"↑ above":"↓ below"} {over?safe.max:safe.min}
+              <span key={k} style={{fontSize:10,background:"rgba(248,113,113,0.14)",color:"#f87171",borderRadius:5,padding:"2px 8px",fontWeight:600}}>
+                {PARAM_LABELS[k]}: {v}{unit} {over?"↑":"↓"} {over?`above ${safe.max}`:`below ${safe.min}`}
               </span>
             );
           })}
         </div>
       )}
       {dueTasks.length>0&&(
-        <div style={{background:"rgba(251,191,36,0.07)",border:"1px solid #fbbf24",borderRadius:12,padding:"12px 16px",marginBottom:14,display:"flex",flexWrap:"wrap",gap:8,alignItems:"center"}}>
-          <span style={{fontSize:16}}>📅</span>
-          <span style={{fontSize:12,fontWeight:700,color:"#fbbf24"}}>{dueTasks.length} task{dueTasks.length>1?"s":""} overdue</span>
-          {dueTasks.map(t=><span key={t.id} style={{fontSize:11,background:"rgba(251,191,36,0.15)",color:"#fbbf24",borderRadius:6,padding:"2px 10px",fontWeight:600}}>{t.title}</span>)}
+        <div style={{display:"flex",alignItems:"center",gap:8,background:"rgba(251,191,36,0.06)",borderLeft:"3px solid #fbbf24",borderRadius:8,padding:"8px 14px",marginBottom:10,flexWrap:"wrap"}}>
+          <span style={{fontSize:13}}>📅</span>
+          <span style={{fontSize:11,fontWeight:700,color:"#fbbf24",marginRight:4}}>{dueTasks.length} task{dueTasks.length>1?"s":""} overdue</span>
+          {dueTasks.map(t=><span key={t.id} style={{fontSize:10,background:"rgba(251,191,36,0.14)",color:"#fbbf24",borderRadius:5,padding:"2px 8px",fontWeight:600}}>{t.title}</span>)}
         </div>
       )}
 
-      <div style={{...S.card,marginBottom:14}}>
-        <div style={{fontSize:13,fontWeight:700,marginBottom:12,color:"#cbd5e1"}}>All Tanks — Quick Status</div>
-        <div className="grid-6">
-          {tanks.map(t=>{
-            const tn=tankName(t),tc=getTankColor(tn,tanks);
-            const last=params.filter(p=>p.tank===tn).sort((a,b)=>b.date.localeCompare(a.date))[0];
-            const liveC=lsLog.filter(l=>l.tank===tn&&l.status==="Live").reduce((s,l)=>s+(l.qty||1),0);
-            const isAct=activeTank===tn;
-            const isTankSW = t.type==="saltwater";
-            const lastDisplay = last ? {
-              ...last,
-              alkalinity: (last.alkalinity!=null && !isTankSW)
-                ? Math.round(Number(last.alkalinity)*0.056*100)/100
-                : last.alkalinity
-            } : null;
-            const hasAlert=lastDisplay&&Object.keys(PARAM_SAFE).some(k=>{
-              const safe=getSafe(k,isTankSW);
-              return lastDisplay[k]!=null&&(lastDisplay[k]<safe.min||lastDisplay[k]>safe.max);
-            });
-            const dueC=tasks.filter(t=>t.tank===tn&&t.active&&t.next_due&&t.next_due<=TODAY_STR).length;
-            return(
-              <button key={tn} onClick={()=>setActiveTank(tn)} style={{background:isAct?`${tc}18`:"#07111f",border:`1.5px solid ${isAct?tc:tc+"44"}`,borderRadius:12,padding:"10px 8px",cursor:"pointer",textAlign:"left",width:"100%",position:"relative"}}>
-                {hasAlert&&<span style={{position:"absolute",top:5,right:5,fontSize:10}}>⚠️</span>}
-                {dueC>0&&!hasAlert&&<span style={{position:"absolute",top:5,right:5,fontSize:10}}>📅</span>}
-                <div style={{fontSize:16,marginBottom:2}}>{t.type==="saltwater"?"🪸":"🐡"}</div>
-                <div style={{fontSize:11,fontWeight:700,color:tc,marginBottom:2,lineHeight:1.3,wordBreak:"break-word"}}>{tn}</div>
-                <div style={{fontSize:10,color:"#475569",marginBottom:2}}>{t.volume_gal||t.size}·{liveC} live</div>
-                {last?.nitrate!=null&&<div style={{fontSize:10,color:last.nitrate<=20?"#4ade80":"#f87171"}}>NO₃ {last.nitrate}{last.nitrate<=20?" ✓":" ⚠"}</div>}
-                {last?.date&&<div style={{fontSize:9,color:"#334155",marginTop:1}}>Last: {fmt(last.date)}</div>}
-              </button>
-            );
-          })}
-        </div>
+      {/* ── Tank cards (primary tab selector) ── */}
+      <div style={{fontSize:10,fontWeight:700,color:"#475569",textTransform:"uppercase",letterSpacing:".08em",marginBottom:8}}>All Tanks</div>
+      <div className="grid-6" style={{marginBottom:14}}>
+        {tanks.map(t=>{
+          const tn=tankName(t),tc=getTankColor(tn,tanks);
+          const last=params.filter(p=>p.tank===tn).sort((a,b)=>b.date.localeCompare(a.date))[0];
+          const liveC=lsLog.filter(l=>l.tank===tn&&l.status==="Live").reduce((s,l)=>s+(l.qty||1),0);
+          const isAct=activeTank===tn;
+          const isTankSW = t.type==="saltwater";
+          const lastDisplay = last ? {
+            ...last,
+            alkalinity: (last.alkalinity!=null && !isTankSW)
+              ? Math.round(Number(last.alkalinity)*0.056*100)/100
+              : last.alkalinity
+          } : null;
+          const hasAlert=lastDisplay&&Object.keys(PARAM_SAFE).some(k=>{
+            const safe=getSafe(k,isTankSW);
+            return lastDisplay[k]!=null&&(lastDisplay[k]<safe.min||lastDisplay[k]>safe.max);
+          });
+          const dueC=tasks.filter(t=>t.tank===tn&&t.active&&t.next_due&&t.next_due<=TODAY_STR).length;
+          return(
+            <button key={tn} onClick={()=>setActiveTank(tn)} style={{
+              background:isAct?`${tc}18`:"#07111f",
+              border:`1.5px solid ${isAct?tc:"transparent"}`,
+              borderRadius:12,padding:"10px 8px",cursor:"pointer",textAlign:"left",width:"100%",position:"relative",
+              transition:"border-color .15s,background .15s"
+            }}>
+              {hasAlert&&<span style={{position:"absolute",top:5,right:5,fontSize:10}}>⚠️</span>}
+              {dueC>0&&!hasAlert&&<span style={{position:"absolute",top:5,right:5,fontSize:10}}>📅</span>}
+              <div style={{fontSize:16,marginBottom:3}}>{t.type==="saltwater"?"🪸":"🐡"}</div>
+              <div style={{fontSize:11,fontWeight:700,color:isAct?tc:"#94a3b8",marginBottom:2,lineHeight:1.3,wordBreak:"break-word"}}>{tn}</div>
+              <div style={{fontSize:10,color:"#475569",marginBottom:2}}>{t.volume_gal||t.size} · {liveC} live</div>
+              {last?.nitrate!=null&&<div style={{fontSize:10,color:last.nitrate<=20?"#4ade80":"#f87171"}}>NO₃ {last.nitrate}{last.nitrate<=20?" ✓":" ⚠"}</div>}
+            </button>
+          );
+        })}
       </div>
 
-      <div style={{display:"flex",gap:6,marginBottom:14,flexWrap:"wrap"}}>
-        {tanks.map(t=>{const tn=tankName(t),tc=getTankColor(tn,tanks);return(
-          <button key={tn} onClick={()=>setActiveTank(tn)} style={{background:activeTank===tn?`${tc}22`:"#0d1a2d",border:`1.5px solid ${activeTank===tn?tc:"#1e3a5f"}`,borderRadius:10,padding:"6px 12px",cursor:"pointer",color:activeTank===tn?tc:"#64748b",fontWeight:600,fontSize:11,whiteSpace:"nowrap"}}>
-            {t.type==="saltwater"?"🪸":"🐡"} {tn}
-          </button>
-        );})}
-      </div>
-
+      {/* ── 3-col detail section ── */}
       <div className="grid-3" style={{marginBottom:14}}>
-        <div style={{...S.card,borderTop:`3px solid ${color}`}}>
-          <div style={{fontSize:11,color:"#64748b",fontWeight:600,textTransform:"uppercase",letterSpacing:".08em",marginBottom:8}}>Tank Info</div>
-          <div style={{fontSize:17,fontWeight:700,color,marginBottom:2}}>{activeTank}</div>
-          <div style={{fontSize:12,color:"#94a3b8",marginBottom:2}}>{isSW?"🐠 Saltwater":"🐟 Freshwater"}·{tank?.volume_gal?tank.volume_gal+"G":tank?.size}</div>
+        <div style={{...S.card,borderTop:`2px solid ${color}`}}>
+          <div style={{fontSize:10,fontWeight:700,color:"#475569",textTransform:"uppercase",letterSpacing:".08em",marginBottom:8}}>Tank Info</div>
+          <div style={{fontSize:16,fontWeight:700,color,marginBottom:2}}>{activeTank}</div>
+          <div style={{fontSize:12,color:"#64748b",marginBottom:8}}>{isSW?"🐠 Saltwater":"🐟 Freshwater"} · {tank?.volume_gal?tank.volume_gal+"G":tank?.size}</div>
           {tank?.dimensions&&<div style={{fontSize:11,color:"#475569",marginBottom:2}}>📐 {tank.dimensions}</div>}
           {tank?.brand&&<div style={{fontSize:11,color:"#475569",marginBottom:2}}>🏷 {tank.brand}</div>}
-          {tank?.equipment&&<div style={{fontSize:11,color:"#64748b",marginBottom:2}}>⚙️ {tank.equipment}</div>}
-          <div style={{fontSize:11,color:"#475569",marginBottom:10}}>Since {fmt(tank?.setup_date||tank?.setup)}</div>
-          <div style={{fontSize:10,color:"#64748b",fontWeight:600,textTransform:"uppercase",marginBottom:5}}>Live ({totalLive})</div>
+          {tank?.equipment&&<div style={{fontSize:11,color:"#475569",marginBottom:2}}>⚙️ {tank.equipment}</div>}
+          <div style={{fontSize:11,color:"#334155",marginBottom:10}}>Since {fmt(tank?.setup_date||tank?.setup)}</div>
+          <div style={{fontSize:10,fontWeight:700,color:"#475569",textTransform:"uppercase",letterSpacing:".06em",marginBottom:5}}>Live ({totalLive})</div>
           <div style={{display:"flex",flexDirection:"column",gap:3,maxHeight:150,overflowY:"auto"}}>
             {liveTankLS.map((l,i)=>(
-              <div key={l.id||i} style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"#94a3b8",background:"#07111f",borderRadius:5,padding:"3px 8px"}}>
+              <div key={l.id||i} style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"#94a3b8",background:"rgba(255,255,255,0.03)",borderRadius:5,padding:"3px 8px"}}>
                 <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",marginRight:6}}>{l.qty>1?`${l.qty}× `:""}{l.name}</span>
-                <span style={{color:"#475569",fontFamily:"'DM Mono',monospace",whiteSpace:"nowrap"}}>{daysAlive(l.date_added)}d</span>
+                <span style={{color:"#334155",fontFamily:"'DM Mono',monospace",whiteSpace:"nowrap"}}>{daysAlive(l.date_added)}d</span>
               </div>
             ))}
             {liveTankLS.length===0&&<div style={{fontSize:11,color:"#334155"}}>No livestock recorded.</div>}
@@ -893,13 +890,10 @@ function Dashboard({tanks,params,diary,lsLog,tasks,activeTank,setActiveTank,tank
         </div>
 
         <div style={S.card}>
-          <div style={{fontSize:11,color:"#64748b",fontWeight:600,textTransform:"uppercase",letterSpacing:".08em",marginBottom:8}}>
-            Latest Readings <span style={{color:"#475569",fontWeight:400,textTransform:"none"}}>(most recent per parameter)</span>
-          </div>
+          <div style={{fontSize:10,fontWeight:700,color:"#475569",textTransform:"uppercase",letterSpacing:".08em",marginBottom:10}}>Latest Readings</div>
           {allTP.length>0?(
             <div className="grid-2">
               {(isSW?SW_PARAMS:FW_PARAMS).map(p=>{
-                // find the latest reading that has this parameter
                 const rec=allTP.find(r=>r[p]!=null);
                 if(!rec) return null;
                 const raw=rec[p];
@@ -907,17 +901,15 @@ function Dashboard({tanks,params,diary,lsLog,tasks,activeTank,setActiveTank,tank
                 const displayVal=alk?alk.val:Number(raw);
                 const safe=getSafe(p,isSW),ok=displayVal>=safe.min&&displayVal<=safe.max;
                 return(
-                  <div key={p} style={{background:"#07111f",borderRadius:8,padding:"8px 10px",border:`1px solid ${ok?"transparent":"#f87171"}`}}>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:2}}>
-                      <div style={{fontSize:10,color:"#475569"}}>{PARAM_LABELS[p]}</div>
-                      <div style={{fontSize:9,color:"#334155"}}>{fmtShort(rec.date)}</div>
+                  <div key={p} style={{background:"rgba(255,255,255,0.03)",borderRadius:8,padding:"8px 10px",borderLeft:ok?"none":"2px solid #f87171"}}>
+                    <div style={{fontSize:9,color:"#64748b",marginBottom:4}}>{PARAM_LABELS[p]}</div>
+                    <div style={{display:"flex",alignItems:"baseline",gap:4,marginBottom:2}}>
+                      <span style={{fontSize:20,fontWeight:700,color:ok?"#e2e8f0":"#f87171",fontFamily:"'DM Mono',monospace",lineHeight:1}}>{displayVal}</span>
+                      {alk&&alk.raw&&<span style={{fontSize:9,color:"#334155"}}>({alk.raw}ppm)</span>}
+                      {ok&&<span style={{fontSize:10,color:"#10B981"}}>✓</span>}
                     </div>
-                    <div style={{display:"flex",alignItems:"center",gap:4}}>
-                      <span style={{fontSize:16,fontWeight:700,color:ok?"#4ade80":"#f87171",fontFamily:"'DM Mono',monospace"}}>{displayVal}</span>
-                      {alk&&alk.raw&&<span style={{fontSize:9,color:"#334155"}}>({alk.raw} ppm)</span>}
-                      <span style={{fontSize:11}}>{ok?"✓":"⚠️"}</span>
-                    </div>
-                    <div style={{fontSize:9,color:"#334155",marginTop:1}}>Safe: {safe.min}–{safe.max}</div>
+                    <div style={{fontSize:9,color:"#334155"}}>Safe {safe.min}–{safe.max}</div>
+                    <div style={{fontSize:9,color:"#334155",marginTop:1}}>{fmtShort(rec.date)}</div>
                   </div>
                 );
               }).filter(Boolean)}
@@ -926,14 +918,14 @@ function Dashboard({tanks,params,diary,lsLog,tasks,activeTank,setActiveTank,tank
         </div>
 
         <div style={S.card}>
-          <div style={{fontSize:11,color:"#64748b",fontWeight:600,textTransform:"uppercase",letterSpacing:".08em",marginBottom:8}}>Maintenance — Last 4 Weeks</div>
+          <div style={{fontSize:10,fontWeight:700,color:"#475569",textTransform:"uppercase",letterSpacing:".08em",marginBottom:8}}>Maintenance — Last 4 Weeks</div>
           {recentDiary.length>0?recentDiary.map((d,i)=>(
-            <div key={d.id||i} style={{borderBottom:i<recentDiary.length-1?"1px solid #0f2035":"none",paddingBottom:6,marginBottom:6}}>
-              <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}>
-                <span style={{fontSize:10,background:`${CAT_COLORS[d.category]||"#64748b"}22`,color:CAT_COLORS[d.category]||"#64748b",borderRadius:4,padding:"1px 6px",fontWeight:600}}>{d.category}</span>
-                <span style={{fontSize:10,color:"#334155"}}>{fmt(d.date)}</span>
+            <div key={d.id||i} style={{borderBottom:i<recentDiary.length-1?"1px solid #0f2035":"none",paddingBottom:7,marginBottom:7}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3}}>
+                <span style={{fontSize:10,background:`${CAT_COLORS[d.category]||"#64748b"}22`,color:CAT_COLORS[d.category]||"#64748b",borderRadius:4,padding:"2px 7px",fontWeight:700}}>{d.category}</span>
+                <span style={{fontSize:10,color:"#334155"}}>{fmtShort(d.date)}</span>
               </div>
-              <div style={{fontSize:11,color:"#94a3b8",lineHeight:1.4}}>{d.notes}</div>
+              <div style={{fontSize:11,color:"#94a3b8",lineHeight:1.5}}>{d.notes}</div>
             </div>
           )):<div style={{color:"#475569",fontSize:13}}>No activity in last 4 weeks.</div>}
         </div>
