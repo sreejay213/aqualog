@@ -1513,13 +1513,13 @@ function LSView({lsLog,setLsLog,showToast,tanks,tankName}) {
 }
 
 // ─── My Tanks ─────────────────────────────────────────────────────────────────
-function MyTanks({tanks,params,diary,lsLog,tankName}) {
+function MyTanks({tanks,activeTanks,params,diary,lsLog,tankName}) {
   const [exp,setExp]=useState(null);
   return (
     <div>
-      <div style={{marginBottom:20}}><div style={{fontSize:20,fontWeight:700,color:"#e2e8f0",marginBottom:3}}>My Tanks</div><div style={{fontSize:13,color:"#475569"}}>{tanks.length} tanks · {tanks.filter(t=>t.type==="freshwater").length} freshwater · {tanks.filter(t=>t.type==="saltwater").length} saltwater</div></div>
+      <div style={{marginBottom:20}}><div style={{fontSize:20,fontWeight:700,color:"#e2e8f0",marginBottom:3}}>My Tanks</div><div style={{fontSize:13,color:"#475569"}}>{activeTanks.length} tanks · {activeTanks.filter(t=>t.type==="freshwater").length} freshwater · {activeTanks.filter(t=>t.type==="saltwater").length} saltwater</div></div>
       <div className="grid-2">
-        {tanks.map(t=>{
+        {activeTanks.map(t=>{
           const tn=tankName(t),tc=getTankColor(tn,tanks);
           const ls=lsLog.filter(l=>l.tank===tn&&l.status==="Live");
           const total=ls.reduce((s,l)=>s+(l.qty||1),0);
