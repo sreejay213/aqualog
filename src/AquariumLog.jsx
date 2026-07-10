@@ -1280,14 +1280,14 @@ function LogLivestock({tanks,activeTanks,lsLog,setLsLog,showToast,tankName,user}
           <button key={k} onClick={()=>setTab(k)} style={{background:tab===k?"rgba(56,189,248,0.15)":"#0d1a2d",border:`1.5px solid ${tab===k?"#38bdf8":"#1e3a5f"}`,color:tab===k?"#7dd3fc":"#64748b",borderRadius:10,padding:"7px 18px",cursor:"pointer",fontSize:13,fontWeight:700}}>{l}</button>
         ))}
       </div>
-      {tab==="add"&&<LSAdd  tanks={tanks} lsLog={lsLog} setLsLog={setLsLog} showToast={showToast} tankName={tankName}/>}
-      {tab==="view"&&<LSView tanks={tanks} lsLog={lsLog} setLsLog={setLsLog} showToast={showToast} tankName={tankName}/>}
+      {tab==="add"&&<LSAdd  tanks={tanks} activeTanks={activeTanks} lsLog={lsLog} setLsLog={setLsLog} showToast={showToast} tankName={tankName} user={user}/>}
+      {tab==="view"&&<LSView tanks={tanks} activeTanks={activeTanks} lsLog={lsLog} setLsLog={setLsLog} showToast={showToast} tankName={tankName}/>}
     </div>
   );
 }
 
-function LSAdd({tanks,lsLog,setLsLog,showToast,tankName}) {
-  const firstTank = tanks.length ? tankName(tanks[0]) : "";
+function LSAdd({tanks,activeTanks,lsLog,setLsLog,showToast,tankName,user}) {
+  const firstTank = activeTanks.length ? tankName(activeTanks[0]) : "";
   const blank={tank:firstTank,event:"Added",name:"",qty:1,type:"",dateAdded:TODAY_STR,dateDied:"",moveTo:"",comments:""};
   const [f,setF]=useState(blank);
   const [saving,setSaving]=useState(false);
